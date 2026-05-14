@@ -16,30 +16,32 @@
 
 
 // FIX: Replaced incorrect component code with proper type definitions.
-export enum Page {
-  AGENTS = 'GE Agent Manager',
-  ASSISTANT = 'Assistant',
-  AUTHORIZATIONS = 'Authorizations',
-  AGENT_PERMISSIONS = 'Agent Permissions',
-  AGENT_ENGINES = 'Available Agents',
-  A2A_TESTER = 'A2A Tester',
-  AGENT_BUILDER = 'Agent Builder',
-  AGENT_CATALOG = 'Agent Catalog',
-  CLOUD_RUN_AGENTS = 'Cloud Run Agents',
-  DIALOGFLOW_AGENTS = 'Dialogflow Agents',
-  CHAT = 'Test G.E. Agent',
-  DATA_STORES = 'Data Stores',
-  MCP_SERVERS = 'MCP Servers',
-  MODEL_ARMOR = 'Model Armor',
-  OBSERVABILITY = 'Observability',
-  BACKUP_RECOVERY = 'Backup & Recovery',
-  ARCHITECTURE = 'Architecture',
-  LICENSE = 'Licenses',
-  CONNECTORS = 'Connectors',
-  AGENT_STARTER_PACK = 'Agent Starter Pack',
-  GE_QUOTA_USAGE = 'GE Quota Usage',
-  VANITY_URLS = 'Redirect URLs',
-}
+export const Page = {
+  AGENTS: 'GE Agent Manager',
+  ASSISTANT: 'Assistant',
+  AUTHORIZATIONS: 'Authorizations',
+  AGENT_PERMISSIONS: 'Agent Permissions',
+  AGENT_ENGINES: 'Available Agents',
+  A2A_TESTER: 'A2A Tester',
+  AGENT_BUILDER: 'Agent Builder',
+  AGENT_CATALOG: 'Agent Catalog',
+  CLOUD_RUN_AGENTS: 'Cloud Run Agents',
+  DIALOGFLOW_AGENTS: 'Dialogflow Agents',
+  CHAT: 'Test G.E. Agent',
+  DATA_STORES: 'Data Stores',
+  MCP_SERVERS: 'MCP Servers',
+  MODEL_ARMOR: 'Model Armor',
+  OBSERVABILITY: 'Observability',
+  BACKUP_RECOVERY: 'Backup & Recovery',
+  ARCHITECTURE: 'Architecture',
+  LICENSE: 'Licenses',
+  CONNECTORS: 'Connectors',
+  AGENT_STARTER_PACK: 'Agent Starter Pack',
+  GE_QUOTA_USAGE: 'GE Quota Usage',
+  VANITY_URLS: 'Redirect URLs',
+} as const;
+
+export type Page = typeof Page[keyof typeof Page];
 
 export type SortableAgentKey = 'displayName' | 'state' | 'name' | 'updateTime' | 'agentType';
 export type SortDirection = 'asc' | 'desc';

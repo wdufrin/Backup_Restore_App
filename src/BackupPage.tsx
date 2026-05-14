@@ -64,7 +64,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken: _, projectNumber, 
   const [, setIsLoadingBuckets] = useState(false);
   
   // Available Backup Files (Keyed by section prefix)
-  const [backupFiles, setBackupFiles] = useState<Record<string, string[]>>({});
+  const [backupFiles, setBackupFiles] = useState<Record<string, any[]>>({});
 
   const [, setIsLoadingFiles] = useState(false);
 
@@ -354,7 +354,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken: _, projectNumber, 
           const objects = res.items || [];
           
           // Categorize files based on prefixes
-        const categorized: Record<string, string[]> = {
+        const categorized: Record<string, any[]> = {
           'Agents': [],
           'NotebookLM': [],
         };

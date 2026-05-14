@@ -17,7 +17,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import type { DiscoverySession, Config } from '../../types';
 import * as api from '../../services/apiService';
-import { createDiscoverySession } from '../../services/apiService';
 
 interface ChatHistoryArchiveViewerProps {
     sessions: DiscoverySession[];
@@ -94,7 +93,6 @@ const FetchAnswerButton: React.FC<FetcherProps> = ({ resourceName, config, onLoa
 
             // Robust content extraction
             let text = extractTextFromResponse(result);
-            let isStructured = !text;
 
             if (!text) {
                 // Fallback for purely structured/unknown data
@@ -223,8 +221,8 @@ const ChatHistoryArchiveViewer: React.FC<ChatHistoryArchiveViewerProps> = ({ ses
     const [searchQuery, setSearchQuery] = useState('');
     const [userFilter, setUserFilter] = useState<string>('');
     const [selectedApp, setSelectedApp] = useState<string>('');
-    const [fromDate, setFromDate] = useState<string>('');
-    const [toDate, setToDate] = useState<string>('');
+    const [fromDate] = useState<string>('');
+    const [toDate] = useState<string>('');
     const [targetUserId, setTargetUserId] = useState<string>('');
 
     const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);

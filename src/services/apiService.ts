@@ -16,7 +16,7 @@
  */
 
 
-import type { Agent, AppEngine, Assistant, Authorization, ChatMessage, Config, DataStore, Document, LogEntry, ReasoningEngine, CloudRunService, GcsBucket, GcsObject, DialogflowAgent, DiscoverySession, ReasoningEngineSession, WidgetConfig } from '../types';
+import type { Agent, AppEngine, Assistant, Authorization, Config, DataStore, Document, ReasoningEngine, CloudRunService, DiscoverySession, ReasoningEngineSession, WidgetConfig } from '../types';
 import { getGapiClient } from './gapiService';
 
 const DISCOVERY_API_VERSION = 'v1alpha';
@@ -202,7 +202,7 @@ export const getServiceUsageOperation = async (name: string) => {
     return gapiRequest<any>(`https://serviceusage.googleapis.com/v1/${name}`);
 };
 
-export const checkServiceAccountPermissions = async (projectId: string, saEmail: string, permissions: string[]): Promise<{ hasAll: boolean, missing: string[] }> => {
+export const checkServiceAccountPermissions = async (projectId: string, _saEmail: string, permissions: string[]): Promise<{ hasAll: boolean, missing: string[] }> => {
     const response = await gapiRequest<any>(
         `https://cloudresourcemanager.googleapis.com/v1/projects/${projectId}:testIamPermissions`,
         'POST',
@@ -962,7 +962,7 @@ export const getDocument = async (name: string, config: Config) => {
     return gapiRequest<Document>(`${baseUrl}/${DISCOVERY_API_BETA}/${name}`, 'GET', config.projectId);
 };
 
-export const importDocuments = async (dataStoreName: string, gcsUris: string[], bucket: string, config: Config) => {
+export const importDocuments = async (dataStoreName: string, gcsUris: string[], _bucket: string, config: Config) => {
     const baseUrl = getDiscoveryEngineUrl(config.appLocation);
     const payload = {
         reconciliationMode: "INCREMENTAL",
@@ -1075,7 +1075,7 @@ export const deleteReasoningEngineSession = async (sessionName: string, config: 
 };
 
 // Stream Assist API
-export const streamChat = async (agentName: string | null, query: string, sessionId: string | null, config: Config, accessToken: string, onChunk: (chunk: any) => void, toolsSpec?: any) => {
+export const streamChat = async (_agentName: string | null, query: string, sessionId: string | null, config: Config, accessToken: string, onChunk: (chunk: any) => void, toolsSpec?: any) => {
     const { projectId, appLocation, collectionId, appId, assistantId } = config;
     const baseUrl = getDiscoveryEngineUrl(appLocation);
     const url = `${baseUrl}/v1alpha/projects/${projectId}/locations/${appLocation}/collections/${collectionId}/engines/${appId}/assistants/${assistantId}:streamAssist`;
@@ -1923,7 +1923,7 @@ export const distributeLicense = async (billingAccountId: string, billingAccount
     licenseCount: number;
     licenseConfigId?: string;
 }, config: Config) => {
-    const { appLocation, projectId } = config; // We use config.projectId for X-Goog-User-Project header
+    const { projectId } = config; // We use config.projectId for X-Goog-User-Project header
     // Ideally appLocation should match payload.location or be global?
     // The user instruction says ENDPOINT_LOCATION should match LOCATION.
     const baseUrl = getDiscoveryEngineUrl(payload.location);

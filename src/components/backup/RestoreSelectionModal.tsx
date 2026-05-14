@@ -55,7 +55,7 @@ const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
     }
   }, [isOpen, items]);
 
-  const allItemNames = useMemo(() => items.map(item => item.name), [items]);
+
 
   const handleToggle = (itemName: string) => {
     setSelectedNames(prev => {
