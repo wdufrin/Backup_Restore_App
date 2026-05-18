@@ -97,7 +97,6 @@ const FetchAnswerButton: React.FC<FetcherProps> = ({ resourceName, config, onLoa
             if (!text) {
                 // Fallback for purely structured/unknown data
                 text = '[Complex Data]';
-                isStructured = true;
             }
 
             setContent(text);

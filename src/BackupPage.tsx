@@ -20,6 +20,7 @@ import type { Agent, AppEngine, Authorization, Config, ReasoningEngine, GcsBucke
 import * as api from './services/apiService';
 import ProjectInput from './components/ProjectInput';
 import RestoreSelectionModal from './components/backup/RestoreSelectionModal';
+import type { SelectableItem } from './components/backup/RestoreSelectionModal';
 import ChatHistoryArchiveViewer from './components/backup/ChatHistoryArchiveViewer';
 import ClientSecretPrompt from './components/backup/ClientSecretPrompt';
 import CurlInfoModal from './components/CurlInfoModal';
@@ -30,21 +31,62 @@ interface BackupPageProps {
   projectNumber: string;
   setProjectNumber: (projectNumber: string) => void;
   userEmail: string;
+  isSettingsOpen?: boolean;
+  onCloseSettings?: () => void;
+  poolId?: string;
 }
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+const mapSourceToPayload = (source: any) => {
+  const sourcePayload: any = {};
+  const sourceName = source.title || source.displayName || 'Restored Source';
 
+  if (source.metadata?.googleDocsMetadata) {
+    sourcePayload.googleDriveContent = {
+      sourceName: sourceName,
+      documentId: source.metadata.googleDocsMetadata.documentId,
+      mimeType: source.metadata.googleDocsMetadata.mimeType || 'application/vnd.google-apps.document'
+    };
+  } else if (source.metadata?.youtubeMetadata) {
+    sourcePayload.videoContent = {
+      youtubeUrl: source.metadata.youtubeMetadata.youtubeUrl || source.metadata.youtubeMetadata.uri || source.metadata.youtubeMetadata.url
+    };
+  } else if (source.metadata?.agentspaceMetadata) {
+    sourcePayload.agentspaceContent = {
+      documentName: source.metadata.agentspaceMetadata.documentName
+    };
+  } else if (source.metadata?.webpageMetadata || source.webScrapeConfig || source.url) {
+    sourcePayload.webContent = {
+      sourceName: sourceName,
+      url: source.metadata?.webpageMetadata?.webpageUrl || source.url || (source.webScrapeConfig && source.webScrapeConfig.url)
+    };
+  } else {
+    // Fallback to minimal text content if unidentifiable or unsupported
+    sourcePayload.textContent = {
+      sourceName: sourceName,
+      content: source.content || source.text || `[Restored Source: ${source.name || sourceName}]`
+    };
+  }
+  return sourcePayload;
+};
 
-
-;
+const getOwnerFromBinding = (member: string): string => {
+  if (member.startsWith('user:')) {
+    return member.replace('user:', '');
+  } else if (member.startsWith('principal://')) {
+    return member.split('/subject/').pop() || member;
+  } else {
+    return member.replace('serviceAccount:', '');
+  }
+};
 
 
 
 
 // --- Main Page Component ---
 
-const BackupPage: React.FC<BackupPageProps> = ({ accessToken: _, projectNumber, setProjectNumber, userEmail }) => {
+const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, setProjectNumber, userEmail, isSettingsOpen, onCloseSettings, poolId }) => {
   const [config, setConfig] = useState({
     appLocation: 'global',
     appId: '',
@@ -53,6 +95,22 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken: _, projectNumber, 
     collectionId: 'default_collection',
     assistantId: 'default_assistant',
   });
+  const [activeTab, setActiveTab] = useState<'admin' | 'user'>('admin');
+  const [userTabConfig, setUserTabConfig] = useState({
+    sourceProject: '',
+    sourceLocation: 'global',
+    sourceAppId: '',
+    targetProject: '',
+    targetLocation: 'global',
+    targetAppId: '',
+  });
+  const [isUserConfigModalOpen, setIsUserConfigModalOpen] = useState(false);
+  const [sourceApps, setSourceApps] = useState<any[]>([]);
+  const [targetApps, setTargetApps] = useState<any[]>([]);
+  const [isLoadingSourceApps, setIsLoadingSourceApps] = useState(false);
+  const [isLoadingTargetApps, setIsLoadingTargetApps] = useState(false);
+  const [isDebugMode, setIsDebugMode] = useState(false);
+  const [restoreFileContent, setRestoreFileContent] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingSection, setLoadingSection] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -83,6 +141,29 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken: _, projectNumber, 
   const [expandedAgentIdx, setExpandedAgentIdx] = useState<number | null>(null);
   const [expandedNotebookIdx, setExpandedNotebookIdx] = useState<number | null>(null);
   const [showRawJsonIdx, setShowRawJsonIdx] = useState<number | null>(null);
+
+  const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
+  const [selectionModalItems, setSelectionModalItems] = useState<SelectableItem[]>([]);
+  const [selectionModalTitle, setSelectionModalTitle] = useState('');
+  const [selectionModalSubtitle, setSelectionModalSubtitle] = useState('');
+  const [selectionModalAction, setSelectionModalAction] = useState<'backup' | 'restore'>('backup');
+  const [pendingBackupData, setPendingBackupData] = useState<any>(null);
+  const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set());
+
+  const handleToggle = (itemName: string) => {
+    setSelectedNames(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(itemName)) {
+        newSet.delete(itemName);
+      } else {
+        newSet.add(itemName);
+      }
+      return newSet;
+    });
+  };
+
+  const [userIdStatus, setUserIdStatus] = useState<{ status: 'pass' | 'fail' | 'pending', details?: string }>({ status: 'pending' });
+  const [isIdCheckExpanded, setIsIdCheckExpanded] = useState(false);
   
   // Resizable column widths
   const [fileNameWidth, setFileNameWidth] = useState<number>(200);
@@ -144,7 +225,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken: _, projectNumber, 
                     if (agent.iamPolicy && agent.iamPolicy.bindings) {
                       const ownerBinding = agent.iamPolicy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
                       if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
-                        owner = ownerBinding.members[0].replace('user:', '').replace('serviceAccount:', '');
+                        owner = getOwnerFromBinding(ownerBinding.members[0]);
                       }
                     }
 
@@ -297,6 +378,24 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken: _, projectNumber, 
       projectId: projectNumber,
   }), [config, projectNumber]);
 
+  const fetchAppsForProject = async (projectId: string, location: string): Promise<any[]> => {
+    if (!projectId) return [];
+    try {
+      const mockConfig = {
+        projectId: projectId,
+        appLocation: location,
+        collectionId: 'default_collection',
+        appId: '',
+        assistantId: 'default_assistant',
+      };
+      const response = await api.listResources('engines', mockConfig);
+      return response.engines || [];
+    } catch (e: any) {
+      addLog(`Failed to fetch apps for project ${projectId}: ${e.message}`);
+      return [];
+    }
+  };
+
   const handleConfigChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setConfig(prev => ({ ...prev, [name]: value }));
@@ -429,6 +528,41 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken: _, projectNumber, 
     fetchApps();
   }, [apiConfig.projectId, apiConfig.appLocation, apiConfig.collectionId]);
 
+  useEffect(() => {
+    const targetProject = userTabConfig.sourceProject;
+    if (accessToken && targetProject) {
+      setUserIdStatus({ status: 'pending' });
+      
+      const testConfig = {
+        projectId: targetProject,
+        appLocation: userTabConfig.sourceLocation || 'global',
+        collectionId: 'default_collection',
+        appId: '',
+        assistantId: 'default_assistant',
+      };
+
+      api.listResources('engines', testConfig)
+        .then(response => {
+          setUserIdStatus({ 
+            status: 'pass', 
+            details: `Permission check passed! You can list engines in project ${targetProject}.` 
+          });
+        })
+        .catch(err => {
+          setUserIdStatus({ 
+            status: 'fail', 
+            details: `Permission check failed for project ${targetProject}: ${err.message}.\n\nHow to fix (Admin Steps):\n\nStep 1: Create the custom role:\n\ngcloud iam roles create customBackupViewer \\\n    --project=${targetProject} \\\n    --title="Discovery Engine Custom Backup Viewer" \\\n    --permissions="discoveryengine.engines.list,discoveryengine.engines.get,discoveryengine.assistants.list,discoveryengine.assistants.get,discoveryengine.agents.list,discoveryengine.agents.get,discoveryengine.agents.manage,discoveryengine.agents.getIamPolicy,discoveryengine.notebooks.list,discoveryengine.notebooks.get" \\\n    --stage=GA\n\nStep 2: Assign the role to your user (Dynamic based on your login):\n\ngcloud projects add-iam-policy-binding ${targetProject} \\\n    --member="principal://iam.googleapis.com/locations/global/workforcePools/${poolId || 'YOUR_POOL_ID'}/subject/${userEmail}" \\\n    --role="projects/${targetProject}/roles/customBackupViewer"\n\nAlternatively, assign to your group if you prefer group-based access control:\n\ngcloud projects add-iam-policy-binding ${targetProject} \\\n    --member="principalSet://iam.googleapis.com/locations/global/workforcePools/${poolId || 'YOUR_POOL_ID'}/group/YOUR_GROUP_ID" \\\n    --role="projects/${targetProject}/roles/customBackupViewer"` 
+          });
+        });
+    }
+  }, [accessToken, userTabConfig.sourceProject, userTabConfig.sourceLocation, apiConfig.projectId]);
+
+  useEffect(() => {
+    if (isSettingsOpen) {
+      setIsUserConfigModalOpen(true);
+    }
+  }, [isSettingsOpen]);
+
   // Fetch Agent Engines
   useEffect(() => {
     if(!apiConfig.projectId || !apiConfig.reasoningEngineLocation) return;
@@ -454,13 +588,15 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken: _, projectNumber, 
   }, [apiConfig.projectId, apiConfig.reasoningEngineLocation]);
 
 
-  const uploadBackupToGcs = async (data: object, filenamePrefix: string) => {
+  const uploadBackupToGcs = async (data: object, filenamePrefix: string, useTimestamp: boolean = true) => {
       if (!selectedBucket) {
           throw new Error("No GCS bucket selected for backup.");
       }
       const jsonString = JSON.stringify(data, null, 2);
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `${filenamePrefix}__${timestamp}.json`;
+      const filename = useTimestamp 
+        ? `${filenamePrefix}__${timestamp}.json`
+        : `${filenamePrefix}.json`;
       const file = new File([jsonString], filename, { type: 'application/json' });
       
       addLog(`Uploading backup to gs://${selectedBucket}/${filename}...`);
@@ -557,9 +693,24 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken: _, projectNumber, 
       }
     }
     
-    const backupData = { type: 'Agents', createdAt: new Date().toISOString(), sourceConfig: apiConfig, agents };
+    let agentsToSave = agents;
+    if (activeTab === 'user') {
+      agentsToSave = agents.filter((agent: any) => {
+        let owner = "N/A";
+        if (agent.iamPolicy && agent.iamPolicy.bindings) {
+          const ownerBinding = agent.iamPolicy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
+          if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
+            owner = getOwnerFromBinding(ownerBinding.members[0]);
+          }
+        }
+        return owner === userEmail;
+      });
+      addLog(`  - User Tab: Filtered down to ${agentsToSave.length} agents owned by you.`);
+    }
+    
+    const backupData = { type: 'Agents', createdAt: new Date().toISOString(), sourceConfig: apiConfig, agents: agentsToSave };
     await uploadBackupToGcs(backupData, `agentspace-agents__${apiConfig.appId || 'N/A'}__${apiConfig.appLocation}`);
-    addLog(`Backup complete! Found ${agents.length} agents.`);
+    addLog(`Backup complete! Found ${agentsToSave.length} agents.`);
   });
 
 
@@ -597,13 +748,332 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken: _, projectNumber, 
       await delay(500); // Rate limit
     }
 
-    const backupData = { type: 'NotebookLM', createdAt: new Date().toISOString(), sourceConfig: apiConfig, notebooks: fullNotebooks };
+    let notebooksToSave = fullNotebooks;
+    if (activeTab === 'user') {
+      notebooksToSave = fullNotebooks.filter((nb: any) => {
+        return nb.metadata?.userRole === 'PROJECT_ROLE_OWNER';
+      });
+      addLog(`  - User Tab: Filtered down to ${notebooksToSave.length} notebooks owned by you.`);
+    }
+
+    const backupData = { type: 'NotebookLM', createdAt: new Date().toISOString(), sourceConfig: apiConfig, notebooks: notebooksToSave };
     await uploadBackupToGcs(backupData, `agentspace-notebooks__${apiConfig.appId || 'N/A'}__${apiConfig.appLocation}`);
-    addLog(`Backup complete! Found ${fullNotebooks.length} fully resolved NotebookLMs.`);
+    addLog(`Backup complete! Found ${notebooksToSave.length} fully resolved NotebookLMs.`);
   });
 
+  const handleUserBackupCombined = async () => executeOperation('BackupUserData', async () => {
+    addLog(`Starting combined backup for user: ${userEmail}...`);
+    
+    let userGaiaIdHex = "";
+    try {
+      const userInfo = await api.getUserInfo(accessToken);
+      if (userInfo && userInfo.sub) {
+        // Convert decimal sub to hex and format as gaia:0x...#
+        userGaiaIdHex = `gaia:0x${BigInt(userInfo.sub).toString(16)}#`;
+        if (isDebugMode) {
+          addLog(`[DEBUG] Resolved User GAIA ID: ${userGaiaIdHex}`);
+        }
+      }
+    } catch (err: any) {
+      addLog(`Warning: Failed to fetch user info for GAIA ID filtering: ${err.message}`);
+    }
+    
+    const sourceConfig = {
+      ...apiConfig,
+      projectId: userTabConfig.sourceProject,
+      appLocation: userTabConfig.sourceLocation || apiConfig.appLocation,
+      appId: userTabConfig.sourceAppId || apiConfig.appId,
+    };
 
+    if (isDebugMode) {
+      addLog(`[DEBUG] Resolved Source Config: ${JSON.stringify(sourceConfig, null, 2)}`);
+    }
 
+    // 1. Backup Agents
+    addLog(`Fetching agents from ${sourceConfig.appId} in ${sourceConfig.appLocation}...`);
+    const agents: Agent[] = [];
+    let pageToken: string | undefined = undefined;
+    do {
+      const agentsResponse = await api.listResources('agents', sourceConfig, pageToken);
+      agents.push(...(agentsResponse.agents || []));
+      pageToken = agentsResponse.nextPageToken;
+    } while (pageToken);
+
+    // Fetch IAM policies and filter
+    const userAgents = [];
+    for (const agent of agents) {
+      try {
+        const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
+        let owner = "N/A";
+        if (policy && policy.bindings) {
+          const ownerBinding = policy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
+          if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
+            owner = getOwnerFromBinding(ownerBinding.members[0]);
+          }
+        }
+        
+        let isOwner = false;
+        if (owner === userEmail) {
+          isOwner = true;
+        }
+
+        // Extra check for low-code agents if GAIA ID is available
+        if (userGaiaIdHex) {
+          const definitionKeys = Object.keys(agent).filter(key => key.toLowerCase().includes('agentdefinition'));
+          for (const key of definitionKeys) {
+            const definition = (agent as any)[key];
+            if (definition && definition.owner) {
+              if (definition.owner === userGaiaIdHex) {
+                isOwner = true; // Confirmed owner!
+              } else {
+                isOwner = false; // Overwrite IAM policy if JSON owner doesn't match!
+              }
+              break;
+            }
+          }
+        }
+
+        if (isOwner) {
+          (agent as any).iamPolicy = policy;
+          userAgents.push(agent);
+        }
+      } catch (e) {
+        addLog(`  - Warning: Failed to backup IAM policy for agent ${agent.name}: ${(e as any).message}`);
+      }
+    }
+    addLog(`Found ${userAgents.length} agents owned by you.`);
+    if (isDebugMode) {
+      addLog(`[DEBUG] Owned Agents: ${JSON.stringify(userAgents.map(a => a.displayName), null, 2)}`);
+    }
+
+    // 2. Backup Notebooks
+    addLog(`Fetching notebooks...`);
+    const response = await api.listNotebooks(sourceConfig);
+    const notebooks = response.notebooks || [];
+    const userNotebooks = [];
+
+    for (const nb of notebooks) {
+      const notebookId = nb.name.split('/').pop()!;
+      try {
+        const rawNotebook = await api.getNotebook(sourceConfig, notebookId);
+        if (rawNotebook.metadata?.userRole === 'PROJECT_ROLE_OWNER') {
+          // Fetch sources
+          const fullSources = [];
+          for (const source of (rawNotebook.sources || [])) {
+            const sourceId = source.name.split('/').pop()!;
+            try {
+              const fullSource = await api.getNotebookSource(sourceConfig, notebookId, sourceId);
+              fullSources.push(fullSource);
+            } catch (sourceErr: any) {
+              fullSources.push(source);
+            }
+          }
+          rawNotebook.sources = fullSources;
+          userNotebooks.push(rawNotebook);
+        }
+      } catch (nbErr: any) {
+        addLog(`  - Error fetching details for notebook ${notebookId}: ${nbErr.message}`);
+      }
+      await delay(500); // Rate limit
+    }
+    addLog(`Found ${userNotebooks.length} notebooks owned by you.`);
+    if (isDebugMode) {
+      addLog(`[DEBUG] Owned Notebooks: ${JSON.stringify(userNotebooks.map(n => n.title), null, 2)}`);
+    }
+
+    // 3. Combine and Open Selection Modal
+    const backupData = {
+      type: 'UserBackup',
+      createdAt: new Date().toISOString(),
+      userEmail,
+      sourceConfig: apiConfig,
+      agents: userAgents,
+      notebooks: userNotebooks
+    };
+
+    const agentItems: SelectableItem[] = userAgents.map(agent => ({
+      name: agent.name,
+      displayName: agent.displayName || 'Unnamed Agent',
+      agentType: 'Agent'
+    }));
+
+    const notebookItems: SelectableItem[] = userNotebooks.map(nb => ({
+      name: nb.name,
+      displayName: nb.title || 'Unnamed Notebook',
+      agentType: 'Notebook'
+    }));
+
+    setSelectionModalItems([...agentItems, ...notebookItems]);
+    setSelectionModalTitle('Select Items to Backup');
+    setSelectionModalSubtitle('Select the agents and notebooks you want to include in the backup file.');
+    setSelectionModalAction('backup');
+    setPendingBackupData(backupData);
+    setIsSelectionModalOpen(true);
+  });
+
+  const handleUserRestoreCombined = async () => executeOperation('RestoreUserData', async () => {
+    if (!restoreFileContent) {
+      throw new Error("No backup file selected or file is empty.");
+    }
+    
+    const targetConfig = {
+      ...apiConfig,
+      projectId: userTabConfig.targetProject,
+      appLocation: userTabConfig.targetLocation || apiConfig.appLocation,
+      appId: userTabConfig.targetAppId || apiConfig.appId,
+    };
+
+    if (isDebugMode) {
+      addLog(`[DEBUG] Resolved Target Config: ${JSON.stringify(targetConfig, null, 2)}`);
+    }
+
+    try {
+      addLog(`Loading backup data from selected file...`);
+      const backupData = JSON.parse(restoreFileContent);
+      
+      if (backupData.type !== 'UserBackup') {
+        throw new Error(`Invalid backup file type. Expected 'UserBackup', but found '${backupData.type}'.`);
+      }
+
+      addLog(`Backup file loaded. Created at: ${backupData.createdAt}`);
+
+      // Fetch target resources for validation
+      addLog(`Fetching current resources from target environment for validation...`);
+      const targetAgents: Agent[] = [];
+      let pageToken: string | undefined = undefined;
+      try {
+        do {
+          const agentsResponse = await api.listResources('agents', targetConfig, pageToken);
+          targetAgents.push(...(agentsResponse.agents || []));
+          pageToken = agentsResponse.nextPageToken;
+        } while (pageToken);
+      } catch (err: any) {
+        addLog(`  - Warning: Failed to fetch target agents for validation: ${err.message}`);
+      }
+
+      let targetNotebooks: any[] = [];
+      try {
+        const response = await api.listNotebooks(targetConfig);
+        targetNotebooks = response.notebooks || [];
+      } catch (err: any) {
+        addLog(`  - Warning: Failed to fetch target notebooks for validation: ${err.message}`);
+      }
+
+      const targetAgentNames = new Set(targetAgents.map(a => a.displayName));
+      const targetNotebookTitles = new Set(targetNotebooks.map(n => n.title));
+
+      const agentItems: SelectableItem[] = (backupData.agents || []).map((agent: any) => {
+        const exists = targetAgentNames.has(agent.displayName);
+        return {
+          name: agent.name,
+          displayName: agent.displayName || 'Unnamed Agent',
+          agentType: 'Agent',
+          disabled: exists,
+          disabledReason: exists ? 'Already exists in target' : undefined
+        };
+      });
+
+      const notebookItems: SelectableItem[] = (backupData.notebooks || []).map((nb: any) => {
+        const exists = targetNotebookTitles.has(nb.title);
+        return {
+          name: nb.name,
+          displayName: nb.title || 'Unnamed Notebook',
+          agentType: 'Notebook',
+          disabled: exists,
+          disabledReason: exists ? 'Already exists in target' : undefined
+        };
+      });
+
+      setSelectionModalItems([...agentItems, ...notebookItems]);
+      setSelectionModalTitle('Select Items to Restore');
+      setSelectionModalSubtitle('Select the agents and notebooks you want to restore. Items that already exist in the target are greyed out.');
+      setSelectionModalAction('restore');
+      setPendingBackupData(backupData);
+      setIsSelectionModalOpen(true);
+      
+      return; // Actual restore happens in handleSelectionConfirm
+    } catch (err: any) {
+      addLog(`Restore failed: ${err.message}`);
+      throw err;
+    }
+  });
+
+  const handleSelectionConfirm = async (selectedItems: SelectableItem[]) => {
+    setIsSelectionModalOpen(false);
+    
+    const selectedNames = new Set(selectedItems.map(i => i.name));
+    
+    if (selectionModalAction === 'backup') {
+      executeOperation('BackupUserData', async () => {
+        addLog(`Creating backup for selected items...`);
+        const filteredAgents = pendingBackupData.agents.filter((a: any) => selectedNames.has(a.name));
+        const filteredNotebooks = pendingBackupData.notebooks.filter((n: any) => selectedNames.has(n.name));
+        
+        const finalBackupData = {
+          ...pendingBackupData,
+          agents: filteredAgents,
+          notebooks: filteredNotebooks
+        };
+        
+        const jsonStr = JSON.stringify(finalBackupData, null, 2);
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `agentspace-user-backup__${userEmail}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        
+        addLog(`Backup complete! File downloaded: agentspace-user-backup__${userEmail}.json`);
+      });
+    } else if (selectionModalAction === 'restore') {
+      executeOperation('RestoreUserData', async () => {
+        addLog(`Restoring selected items...`);
+        const filteredAgents = pendingBackupData.agents.filter((a: any) => selectedNames.has(a.name));
+        const filteredNotebooks = pendingBackupData.notebooks.filter((n: any) => selectedNames.has(n.name));
+        
+        const targetConfig = {
+          ...apiConfig,
+          projectId: userTabConfig.targetProject,
+          appLocation: userTabConfig.targetLocation || apiConfig.appLocation,
+          appId: userTabConfig.targetAppId || apiConfig.appId,
+        };
+
+        // 1. Restore Agents
+        if (filteredAgents.length > 0) {
+          addLog(`Restoring ${filteredAgents.length} agents to ${targetConfig.appId}...`);
+          await restoreAgentsIntoAssistant(filteredAgents, targetConfig, pendingBackupData.sourceConfig);
+        }
+
+        // 2. Restore Notebooks
+        if (filteredNotebooks.length > 0) {
+          addLog(`Restoring ${filteredNotebooks.length} notebooks to ${targetConfig.appId}...`);
+          for (const nb of filteredNotebooks) {
+            try {
+              const payload = {
+                title: `${nb.title || 'Restored Notebook'} (Restored)`,
+                metadata: nb.metadata
+              };
+              const newNotebook = await api.createNotebook(targetConfig, payload);
+              const newNotebookId = newNotebook.name.split('/').pop()!;
+              addLog(`  - Created Notebook: ${newNotebookId}`);
+
+              if (nb.sources && nb.sources.length > 0) {
+                const sourceRequests = nb.sources.map(mapSourceToPayload);
+                await api.batchCreateNotebookSources(targetConfig, newNotebookId, sourceRequests);
+                addLog(`    - Restored ${sourceRequests.length} sources.`);
+              }
+            } catch (nbErr: any) {
+              addLog(`  - Error restoring notebook ${nb.name}: ${nbErr.message}`);
+            }
+          }
+        }
+        addLog(`Restore complete!`);
+      });
+    }
+  };
 
   // --- Restore Handlers & Processors ---
 
@@ -686,7 +1156,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken: _, projectNumber, 
     });
   };
 
-  const restoreAgentsIntoAssistant = async (agents: Agent[], restoreConfig: typeof apiConfig) => {
+  const restoreAgentsIntoAssistant = async (agents: Agent[], restoreConfig: typeof apiConfig, sourceConfig?: any) => {
     addLog(`  - Restoring ${agents.length} agent(s)...`);
     for (const agent of agents) {
       const originalAgentId = agent.name.split('/').pop()!;
@@ -708,6 +1178,14 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken: _, projectNumber, 
           authorizations: !currentAgent.authorizationConfig ? currentAgent.authorizations : undefined,
         };
 
+        // Copy all other fields except blacklist to be complete
+        const blacklist = ['name', 'createTime', 'updateTime', 'agentIdentityInfo', 'iamPolicy'];
+        for (const key of Object.keys(currentAgent)) {
+          if (!blacklist.includes(key) && !(key in payload)) {
+            payload[key] = (currentAgent as any)[key];
+          }
+        }
+
         // Rewrite Authorizations to the NEW project/location
         const rewriteAuth = (authName: string) => {
           if (!authName) return authName;
@@ -723,36 +1201,51 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken: _, projectNumber, 
           payload.authorizations = payload.authorizations.map(rewriteAuth);
         }
 
-        // Dynamically copy ANY definition property from the currentAgent
-        const definitionKeys = Object.keys(currentAgent).filter(key => key.toLowerCase().includes('agentdefinition'));
+        // Apply replacements on definition fields in payload
+        const definitionKeys = Object.keys(payload).filter(key => key.toLowerCase().includes('agentdefinition'));
         for (const key of definitionKeys) {
-          if (key === 'adkAgentDefinition') {
-            const adkDef = currentAgent.adkAgentDefinition;
-            let reasoningEngineStr = adkDef?.provisionedReasoningEngine?.reasoningEngine;
-
-            if (reasoningEngineStr) {
-              const parts = reasoningEngineStr.split('/');
-              if (parts.length >= 6) {
-                const oldReId = parts.pop()!;
-                parts.pop(); // reasoningEngines
-                const oldReLoc = parts.pop()!;
-                parts.pop(); // locations
-                parts.pop(); // consume project ID
-                parts.pop(); // projects
-                // Rebuild with new project and new location
-                reasoningEngineStr = `projects/${restoreConfig.projectId}/locations/${restoreConfig.appLocation || oldReLoc}/reasoningEngines/${oldReId}`;
+          let definition = payload[key];
+          
+          if (definition) {
+            // Scrub hardcoded session references that cause permission errors
+            if ((definition as any).session) {
+              if (isDebugMode) {
+                addLog(`    - [DEBUG] Scrubbing hardcoded session: ${(definition as any).session}`);
               }
+              delete (definition as any).session;
             }
 
-            payload.adkAgentDefinition = {
-              toolSettings: { toolDescription: adkDef?.toolSettings?.toolDescription },
-              provisionedReasoningEngine: { reasoningEngine: reasoningEngineStr }
-            };
-          } else {
-            // For any other agent definition (a2aAgentDefinition, managedAgentDefinition, dialogflowAgentDefinition, generativeAgentDefinition, etc.)
-            // We just pass it along directly in camelCase as the Google Cloud API accepts both cases.
-            payload[key] = (currentAgent as any)[key];
+            let defStr = JSON.stringify(definition);
+            
+            if (isDebugMode) {
+              addLog(`[DEBUG] Agent ${currentAgent.displayName} - Payload BEFORE replacement: ${defStr}`);
+            }
+            
+            // Extract old engine ID from agent name
+            const nameParts = currentAgent.name.split('/');
+            const engineIndex = nameParts.indexOf('engines');
+            const oldEngineId = engineIndex !== -1 ? nameParts[engineIndex + 1] : null;
+
+            if (oldEngineId && restoreConfig.appId) {
+              defStr = defStr.split(oldEngineId).join(restoreConfig.appId);
+            }
+            
+            // Still use sourceConfig for project and location if available
+            if (sourceConfig && sourceConfig.projectId && restoreConfig.projectId) {
+              defStr = defStr.split(sourceConfig.projectId).join(restoreConfig.projectId);
+            }
+            if (sourceConfig && sourceConfig.appLocation && restoreConfig.appLocation) {
+              defStr = defStr.split(sourceConfig.appLocation).join(restoreConfig.appLocation);
+            }
+            
+            if (isDebugMode) {
+              addLog(`[DEBUG] Agent ${currentAgent.displayName} - Payload AFTER replacement: ${defStr}`);
+            }
+            
+            definition = JSON.parse(defStr);
           }
+          
+          payload[key] = definition;
         }
 
         return payload;
@@ -906,7 +1399,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken: _, projectNumber, 
       if (agent.iamPolicy && agent.iamPolicy.bindings) {
         const ownerBinding = agent.iamPolicy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
         if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
-          owner = ownerBinding.members[0].replace('user:', '').replace('serviceAccount:', '');
+          owner = getOwnerFromBinding(ownerBinding.members[0]);
         }
       }
       
@@ -927,7 +1420,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken: _, projectNumber, 
       items: itemsWithTypes,
         originalData: backupData,
         processor: async (data) => {
-            await restoreAgentsIntoAssistant(data.agents, restoreConfig);
+            await restoreAgentsIntoAssistant(data.agents, restoreConfig, backupData.sourceConfig);
         },
     });
   };
@@ -971,39 +1464,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken: _, projectNumber, 
             // Restore sources
             if (notebook.sources && notebook.sources.length > 0) {
               addLog(`    - Restoring ${notebook.sources.length} sources for notebook '${newNotebookId}'...`);
-              const sourceRequests = notebook.sources.map((source: any) => {
-                // Determine source type from metadata or other hints
-                const sourcePayload: any = {};
-                const sourceName = source.title || source.displayName || 'Restored Source';
-
-                if (source.metadata?.googleDocsMetadata) {
-                  sourcePayload.googleDriveContent = {
-                    sourceName: sourceName,
-                    documentId: source.metadata.googleDocsMetadata.documentId,
-                    mimeType: source.metadata.googleDocsMetadata.mimeType || 'application/vnd.google-apps.document'
-                  };
-                } else if (source.metadata?.youtubeMetadata) {
-                  sourcePayload.videoContent = {
-                    youtubeUrl: source.metadata.youtubeMetadata.youtubeUrl || source.metadata.youtubeMetadata.uri || source.metadata.youtubeMetadata.url
-                  };
-                } else if (source.metadata?.agentspaceMetadata) {
-                  sourcePayload.agentspaceContent = {
-                    documentName: source.metadata.agentspaceMetadata.documentName
-                  };
-                } else if (source.metadata?.webpageMetadata || source.webScrapeConfig || source.url) {
-                  sourcePayload.webContent = {
-                    sourceName: sourceName,
-                    url: source.metadata?.webpageMetadata?.webpageUrl || source.url || (source.webScrapeConfig && source.webScrapeConfig.url)
-                  };
-                } else {
-                  // Fallback to minimal text content if unidentifiable or unsupported
-                  sourcePayload.textContent = {
-                    sourceName: sourceName,
-                    content: source.content || source.text || `[Restored Source: ${source.name || sourceName}]`
-                  };
-                }
-                return sourcePayload;
-              });
+              const sourceRequests = notebook.sources.map(mapSourceToPayload);
 
               try {
                 await api.batchCreateNotebookSources(apiConfig, newNotebookId, sourceRequests);
@@ -1055,7 +1516,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken: _, projectNumber, 
   ];
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-7xl mx-auto p-6 text-gray-900">
+    <div className="max-w-7xl mx-auto p-6 text-gray-900">
       {/* Modals */}
       {viewModalData && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -1105,335 +1566,285 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken: _, projectNumber, 
           customMessage={secretPrompt.customMessage}
         />
       )}
-      {infoModalKey && (
-        <CurlInfoModal infoKey={infoModalKey} onClose={() => setInfoModalKey(null)} />
+
+      {isSelectionModalOpen && (
+        <RestoreSelectionModal
+          isOpen={isSelectionModalOpen}
+          onClose={() => setIsSelectionModalOpen(false)}
+          onConfirm={handleSelectionConfirm}
+          title={selectionModalTitle}
+          subtitle={selectionModalSubtitle}
+          items={selectionModalItems}
+          isLoading={isLoading}
+          showIdInput={false}
+          actionLabel={selectionModalAction === 'backup' ? 'Backup' : 'Restore'}
+        />
       )}
 
-      {/* Left Pane - Configuration */}
-      <div className="lg:col-span-4 space-y-6">
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-lg font-bold text-gray-900 tracking-tight">Target Application Configuration</h2>
-          </div>
-          
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Target Project ID / Number</label>
-              <div className="flex gap-2">
-                <ProjectInput value={projectNumber} onChange={handleProjectNumberChange} />
+      {isUserConfigModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-lg max-w-2xl w-full flex flex-col border border-gray-200 p-6">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-lg font-bold text-gray-900">Configure User Tab</h2>
+              <button onClick={() => { setIsUserConfigModalOpen(false); onCloseSettings?.(); }} className="text-gray-400 hover:text-gray-600 transition-colors">
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            <div className="space-y-6">
+              {/* Source Config */}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">Source Environment (for Backup)</h3>
+                <div className="grid grid-cols-3 gap-4 items-end">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Project ID</label>
+                    <div className="flex gap-1">
+                      <input type="text" value={userTabConfig.sourceProject} onChange={(e) => setUserTabConfig(prev => ({ ...prev, sourceProject: e.target.value }))} className="bg-gray-50 border border-gray-300 rounded-lg p-2 text-sm w-full" />
+                      <button 
+                        onClick={async () => {
+                          setIsLoadingSourceApps(true);
+                          const apps = await fetchAppsForProject(userTabConfig.sourceProject, userTabConfig.sourceLocation);
+                          setSourceApps(apps);
+                          setIsLoadingSourceApps(false);
+                        }}
+                        disabled={isLoadingSourceApps || !userTabConfig.sourceProject}
+                        className="px-2 py-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-semibold rounded-lg disabled:bg-gray-300"
+                      >
+                        {isLoadingSourceApps ? '...' : 'Load'}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Location</label>
+                    <select 
+                      value={userTabConfig.sourceLocation} 
+                      onChange={async (e) => {
+                        const newLoc = e.target.value;
+                        setUserTabConfig(prev => ({ ...prev, sourceLocation: newLoc }));
+                        if (userTabConfig.sourceProject) {
+                          setIsLoadingSourceApps(true);
+                          const apps = await fetchAppsForProject(userTabConfig.sourceProject, newLoc);
+                          setSourceApps(apps);
+                          setIsLoadingSourceApps(false);
+                        }
+                      }} 
+                      className="bg-gray-50 border border-gray-300 rounded-lg p-2 text-sm w-full"
+                    >
+                      <option value="global">global</option>
+                      <option value="eu">eu</option>
+                      <option value="us">us</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Engine ID</label>
+                    {sourceApps.length > 0 ? (
+                      <select 
+                        value={userTabConfig.sourceAppId} 
+                        onChange={(e) => setUserTabConfig(prev => ({ ...prev, sourceAppId: e.target.value }))} 
+                        className="bg-gray-50 border border-gray-300 rounded-lg p-2 text-sm w-full"
+                      >
+                        <option value="">Select Engine ...</option>
+                        {sourceApps.map(app => <option key={app.name} value={app.name.split('/').pop()}>{app.displayName || app.name.split('/').pop()}</option>)}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={userTabConfig.sourceAppId}
+                        onChange={(e) => setUserTabConfig(prev => ({ ...prev, sourceAppId: e.target.value }))}
+                        placeholder="Enter Engine ID..."
+                        className="bg-gray-50 border border-gray-300 rounded-lg p-2 text-sm w-full"
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
 
-              </div>
-            </div>
-            
-            <div>
-              <label htmlFor="appLocation" className="block text-sm font-medium text-gray-700 mb-1">Target Location (Discovery)</label>
-              <div className="relative">
-                <select name="appLocation" value={config.appLocation} onChange={handleConfigChange} className="bg-gray-50 border border-gray-300 rounded-lg pl-3 pr-10 py-2.5 text-sm text-gray-900 focus:ring-blue-500 focus:border-blue-500 w-full transition-all appearance-none">
-                  <option value="global">global</option>
-                  <option value="us">us</option>
-                  <option value="eu">eu</option>
-                </select>
-                <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                  <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </div>
-              </div>
-            </div>
-            
-            <div>
-              <label htmlFor="appId" className="block text-sm font-medium text-gray-700 mb-1">Target Gemini Enterprise ID</label>
-              <div className="relative flex items-center gap-2">
-                <div className="relative flex-grow">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
+              {/* Target Config */}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">Target Environment (for Restore)</h3>
+                <div className="grid grid-cols-3 gap-4 items-end">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Project ID</label>
+                    <div className="flex gap-1">
+                      <input type="text" value={userTabConfig.targetProject} onChange={(e) => setUserTabConfig(prev => ({ ...prev, targetProject: e.target.value }))} className="bg-gray-50 border border-gray-300 rounded-lg p-2 text-sm w-full" />
+                      <button 
+                        onClick={async () => {
+                          setIsLoadingTargetApps(true);
+                          const apps = await fetchAppsForProject(userTabConfig.targetProject, userTabConfig.targetLocation);
+                          setTargetApps(apps);
+                          setIsLoadingTargetApps(false);
+                        }}
+                        disabled={isLoadingTargetApps || !userTabConfig.targetProject}
+                        className="px-2 py-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-semibold rounded-lg disabled:bg-gray-300"
+                      >
+                        {isLoadingTargetApps ? '...' : 'Load'}
+                      </button>
+                    </div>
                   </div>
-                  <select name="appId" value={config.appId} onChange={handleConfigChange} disabled={isLoadingApps || apps.length === 0} className="bg-gray-50 border border-gray-300 rounded-lg pl-10 pr-10 py-2.5 text-sm text-gray-900 focus:ring-blue-500 focus:border-blue-500 w-full disabled:bg-gray-100 disabled:text-gray-400 transition-all appearance-none">
-                    <option value="">{isLoadingApps ? 'Loading...' : 'Select App...'}</option>
-                    {apps.map(a => {
-                        const id = a.name.split('/').pop() || '';
-                        return <option key={a.name} value={id}>{a.displayName || id}</option>
-                    })}
-                  </select>
-                  <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                    <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Location</label>
+                    <select 
+                      value={userTabConfig.targetLocation} 
+                      onChange={async (e) => {
+                        const newLoc = e.target.value;
+                        setUserTabConfig(prev => ({ ...prev, targetLocation: newLoc }));
+                        if (userTabConfig.targetProject) {
+                          setIsLoadingTargetApps(true);
+                          const apps = await fetchAppsForProject(userTabConfig.targetProject, newLoc);
+                          setTargetApps(apps);
+                          setIsLoadingTargetApps(false);
+                        }
+                      }} 
+                      className="bg-gray-50 border border-gray-300 rounded-lg p-2 text-sm w-full"
+                    >
+                      <option value="global">global</option>
+                      <option value="eu">eu</option>
+                      <option value="us">us</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Engine ID</label>
+                    {targetApps.length > 0 ? (
+                      <select 
+                        value={userTabConfig.targetAppId} 
+                        onChange={(e) => setUserTabConfig(prev => ({ ...prev, targetAppId: e.target.value }))} 
+                        className="bg-gray-50 border border-gray-300 rounded-lg p-2 text-sm w-full"
+                      >
+                        <option value="">Select Engine ...</option>
+                        {targetApps.map(app => <option key={app.name} value={app.name.split('/').pop()}>{app.displayName || app.name.split('/').pop()}</option>)}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={userTabConfig.targetAppId}
+                        onChange={(e) => setUserTabConfig(prev => ({ ...prev, targetAppId: e.target.value }))}
+                        placeholder="Enter Engine ID..."
+                        className="bg-gray-50 border border-gray-300 rounded-lg p-2 text-sm w-full"
+                      />
+                    )}
                   </div>
                 </div>
-                <button className="p-2.5 bg-gray-50 border border-gray-300 rounded-lg hover:bg-gray-100 text-gray-500 flex-shrink-0">
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                </button>
               </div>
             </div>
-            
-            <div>
-              <label htmlFor="reasoningEngineLocation" className="block text-sm font-medium text-gray-700 mb-1">Agent Engine Location</label>
-              <div className="relative">
-                <select name="reasoningEngineLocation" value={config.reasoningEngineLocation} onChange={handleConfigChange} className="bg-gray-50 border border-gray-300 rounded-lg pl-3 pr-10 py-2.5 text-sm text-gray-900 focus:ring-blue-500 focus:border-blue-500 w-full transition-all appearance-none">
-                    <option value="us-central1">us-central1</option>
-                    <option value="europe-west1">europe-west1</option>
-                    <option value="asia-east1">asia-east1</option>
-                </select>
-                <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                  <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </div>
-              </div>
-            </div>
-            
-            <div>
-              <label htmlFor="reasoningEngineId" className="block text-sm font-medium text-gray-700 mb-1">Target Agent Engine</label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
-                </div>
-                <select name="reasoningEngineId" value={config.reasoningEngineId} onChange={handleConfigChange} disabled={isLoadingReasoningEngines || reasoningEngines.length === 0} className="bg-gray-50 border border-gray-300 rounded-lg pl-10 pr-10 py-2.5 text-sm text-gray-900 focus:ring-blue-500 focus:border-blue-500 w-full disabled:bg-gray-100 disabled:text-gray-400 transition-all appearance-none">
-                  <option value="">{isLoadingReasoningEngines ? 'Loading...' : 'Select Engine ...'}</option>
-                  {reasoningEngines.map(re => {
-                      const id = re.name.split('/').pop() || '';
-                      return <option key={re.name} value={id}>{re.displayName} ({id})</option>
-                  })}
-                </select>
-                <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                  <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </div>
-              </div>
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Backup Bucket (GCS)</label>
-              <div className="relative">
-                <select 
-                    value={selectedBucket} 
-                    onChange={(e) => setSelectedBucket(e.target.value)} 
-                    className="bg-gray-50 border border-gray-300 rounded-lg pl-3 pr-10 py-2.5 text-sm text-gray-900 focus:ring-blue-500 focus:border-blue-500 w-full transition-all appearance-none"
-                >
-                    <option value="">Select Bucket ...</option>
-                    {buckets.map(b => <option key={b.name} value={b.name}>{b.name}</option>)}
-                </select>
-                <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                  <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </div>
-              </div>
+
+            <div className="flex justify-end mt-6">
+              <button onClick={() => { 
+                setIsUserConfigModalOpen(false); 
+                onCloseSettings?.(); 
+                const newProject = userTabConfig.sourceProject || userTabConfig.targetProject;
+                if (newProject) {
+                  setProjectNumber(newProject);
+                }
+              }} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors">Save & Close</button>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Right Pane - Actions */}
-      <div className="lg:col-span-8 space-y-6">
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-bold text-gray-900 tracking-tight">Backup & Restore Actions</h2>
-          </div>
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 relative">
+          <h2 className="text-lg font-bold text-gray-900 mb-4">My Backups</h2>
+          <p className="text-sm text-gray-500 mb-4">Manage backups and restores for your personal agents and notebooks.</p>
           
-          <div className="bg-blue-50 text-blue-700 p-3 rounded-lg text-sm mb-6 flex items-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-            </svg>
-            <span>All backups are stored in a secure Google Cloud Storage bucket.</span>
+          <div className={`mb-6 p-4 rounded-lg border ${userIdStatus.status === 'pass' ? 'bg-green-50 border-green-200' : userIdStatus.status === 'fail' ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-gray-700">Permission Check:</span>
+                {userIdStatus.status === 'pass' ? (
+                  <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-green-100 text-green-700">PASS</span>
+                ) : userIdStatus.status === 'fail' ? (
+                  <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-red-100 text-red-700">FAIL</span>
+                ) : !userTabConfig.sourceProject ? (
+                  <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-yellow-100 text-yellow-700">ENTER A PROJECT</span>
+                ) : (
+                  <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-gray-100 text-gray-700">PENDING</span>
+                )}
+              </div>
+              {userIdStatus.status === 'fail' && (
+                <button 
+                  onClick={() => setIsIdCheckExpanded(!isIdCheckExpanded)} 
+                  className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                >
+                  {isIdCheckExpanded ? 'Hide Details' : 'Show How to Fix'}
+                </button>
+              )}
+            </div>
+            {userIdStatus.status === 'fail' && isIdCheckExpanded && (
+              <div className="mt-3 text-xs text-gray-700 whitespace-pre-wrap break-words bg-white p-4 rounded-lg border border-red-100 font-mono">
+                {userIdStatus.details}
+              </div>
+            )}
+            {userIdStatus.status === 'pass' && (
+              <div className="mt-2 text-xs text-gray-600">
+                {userIdStatus.details}
+              </div>
+            )}
           </div>
 
-
-
-          {/* Resource List / Table */}
-          <div className="border border-gray-200 rounded-lg overflow-hidden mb-6">
-            <table className="w-full text-sm text-left text-gray-700">
-              <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="px-4 py-3 font-medium">Resource Name</th>
-                  <th className="px-4 py-3 font-medium">Type</th>
-                  <th className="px-4 py-3 font-medium">Location</th>
-                  <th className="px-4 py-3 font-medium">Last Backup</th>
-                  <th className="px-4 py-3 font-medium"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {cardConfigs.map(card => {
-                  const availableBackups = backupFiles[card.section] || [];
-                  const lastBackup = availableBackups[0]?.filename || 'Never';
-                  return (
-                    <tr key={card.section} className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
-                      <td className="px-4 py-3 font-medium text-gray-900">
-                        {card.title}
-                      </td>
-                      <td className="px-4 py-3 text-gray-500">{card.section}</td>
-                      <td className="px-4 py-3 text-gray-500">{card.scope}</td>
-                      <td className="px-4 py-3 text-gray-500">{lastBackup}</td>
-                      <td className="px-4 py-3 text-right flex items-center justify-end gap-2">
-                        <button 
-                          onClick={card.backupHandler}
-                          disabled={isLoading || !selectedBucket}
-                          className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors disabled:bg-gray-300"
-                        >
-                          Backup
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="flex items-center gap-2 mb-4">
+            <input 
+              type="checkbox" 
+              id="debugMode" 
+              checked={isDebugMode} 
+              onChange={(e) => setIsDebugMode(e.target.checked)}
+              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <label htmlFor="debugMode" className="text-sm text-gray-700 font-medium cursor-pointer">
+              Enable Verbose Debug Logging
+            </label>
           </div>
 
-          {/* Detailed Action Sections */}
-          <div className="space-y-6">
-            {cardConfigs.map(card => {
-                const isBackupLoading = loadingSection === `Backup${card.section}`;
-                const availableBackups = backupFiles[card.section] || [];
+          <div className="flex flex-col items-center justify-center py-8 space-y-6">
+            <div className="w-full max-w-md mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Upload Backup File for Restore</label>
+              <input 
+                type="file" 
+                accept=".json"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                      setRestoreFileContent(event.target?.result as string);
+                      addLog(`File selected: ${file.name}`);
+                    };
+                    reader.readAsText(file);
+                  }
+                }}
+                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+              />
+            </div>
 
-
-                return (
-                  <div key={card.section} className="border-t border-gray-200 pt-4">
-                    <h3 className="text-base font-semibold text-gray-900 mb-3">{card.title}</h3>
-                    <div className="border border-gray-200 rounded-lg overflow-x-auto">
-                      <table className="w-full text-sm text-left text-gray-700 table-fixed">
-                        <thead className="text-xs text-gray-500 bg-gray-50 border-b border-gray-200">
-                          <tr>
-                            <th 
-                              className="px-4 py-2 font-medium relative group"
-                              style={{ width: `${fileNameWidth}px` }}
-                            >
-                              File name
-                              <div
-                                className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize bg-gray-300 opacity-0 group-hover:opacity-100 hover:bg-blue-500 transition-all"
-                                onMouseDown={(e) => handleResizeMouseDown(e, 'fileName')}
-                              />
-                            </th>
-                            <th 
-                              className="px-4 py-2 font-medium relative group"
-                              style={{ width: `${sourceAppWidth}px` }}
-                            >
-                              Source App
-                              <div
-                                className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize bg-gray-300 opacity-0 group-hover:opacity-100 hover:bg-blue-500 transition-all"
-                                onMouseDown={(e) => handleResizeMouseDown(e, 'sourceApp')}
-                              />
-                            </th>
-                            <th 
-                              className="px-4 py-2 font-medium relative group"
-                              style={{ width: `${regionWidth}px` }}
-                            >
-                              Region
-                              <div
-                                className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize bg-gray-300 opacity-0 group-hover:opacity-100 hover:bg-blue-500 transition-all"
-                                onMouseDown={(e) => handleResizeMouseDown(e, 'region')}
-                              />
-                            </th>
-                            <th className="px-4 py-2 font-medium">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {isBackupLoading && (
-                            <tr className="border-b border-gray-100 text-xs">
-
-                              <td className="px-4 py-2">
-                                <span className="bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full text-xs font-medium">Backup in prog...</span>
-                              </td>
-                              <td className="px-4 py-2 text-gray-500">Healthy</td>
-                              <td className="px-4 py-2 flex gap-1">
-                                <button className="px-2 py-1 bg-blue-600 text-white text-xs font-semibold rounded opacity-50 cursor-not-allowed" disabled>Backup New</button>
-                                <button className="px-2 py-1 bg-blue-600 text-white text-xs font-semibold rounded opacity-50 cursor-not-allowed" disabled>Restore Selected</button>
-                                <button className="px-2 py-1 bg-blue-600 text-white text-xs font-semibold rounded opacity-50 cursor-not-allowed" disabled>Delete Selected</button>
-                              </td>
-                            </tr>
-                          )}
-                          
-                          {availableBackups.length === 0 && !isBackupLoading ? (
-                            <tr className="text-xs text-gray-500">
-                              <td className="px-4 py-3" colSpan={4}>No backups available. Click "Backup New" to create one.</td>
-                            </tr>
-                          ) : (
-                            availableBackups.map((fileObj: any) => (
-                              <tr key={fileObj.filename} className="border-b border-gray-100 text-xs hover:bg-gray-50 transition-colors">
-
-                                <td 
-                                  className="px-4 py-2 text-gray-900 font-medium truncate"
-                                  style={{ width: `${fileNameWidth}px`, maxWidth: `${fileNameWidth}px` }}
-                                  title={fileObj.filename}
-                                >
-                                  {fileObj.filename}
-                                </td>
-                                <td 
-                                  className="px-4 py-2 text-gray-500 truncate"
-                                  style={{ width: `${sourceAppWidth}px`, maxWidth: `${sourceAppWidth}px` }}
-                                  title={fileObj.sourceApp}
-                                >
-                                  {fileObj.sourceApp}
-                                </td>
-                                <td 
-                                  className="px-4 py-2 text-gray-500 truncate"
-                                  style={{ width: `${regionWidth}px`, maxWidth: `${regionWidth}px` }}
-                                  title={fileObj.region}
-                                >
-                                  {fileObj.region}
-                                </td>
-                                <td className="px-4 py-2 flex gap-1">
-                                  <button 
-                                    onClick={() => handleViewGcsFile(fileObj.filename)}
-                                    disabled={isLoading}
-                                    className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded disabled:bg-gray-300 transition-colors"
-                                  >
-                                    View
-                                  </button>
-                                  <button 
-                                    onClick={() => handleRestore(card.section, card.restoreProcessor, fileObj.filename)}
-                                    disabled={isLoading}
-                                    className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded disabled:bg-gray-300 transition-colors"
-                                  >
-                                    Restore Selected
-                                  </button>
-                                  <button 
-                                    onClick={() => handleDownloadGcsFile(fileObj.filename)}
-                                    disabled={isLoading}
-                                    className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded disabled:bg-gray-300 transition-colors"
-                                  >
-                                    Download Selected
-                                  </button>
-                                  <button 
-                                    onClick={() => handleDeleteGcsFile(fileObj.filename)}
-                                    disabled={isLoading}
-                                    className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded disabled:bg-gray-300 transition-colors"
-                                  >
-                                    Delete
-                                  </button>
-                                </td>
-                              </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                    
-                    {/* Quick Action for Backup if empty */}
-                    {availableBackups.length === 0 && !isBackupLoading && (
-                      <div className="mt-2">
-                        <button 
-                          onClick={card.backupHandler}
-                          disabled={isLoading || !selectedBucket}
-                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded shadow-sm transition-colors disabled:bg-gray-300"
-                        >
-                          Backup New
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-            })}
+            <div className="flex gap-6">
+              <button
+                onClick={handleUserBackupCombined}
+                disabled={isLoading || !userTabConfig.sourceProject}
+                className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-md transition-colors disabled:bg-gray-300 flex items-center gap-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+                Backup My Data
+              </button>
+              
+              <button
+                onClick={handleUserRestoreCombined}
+                disabled={isLoading || !restoreFileContent || !userTabConfig.targetProject}
+                className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-xl shadow-md transition-colors disabled:bg-gray-300 flex items-center gap-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Restore My Data
+              </button>
+            </div>
+            
+            <div className="text-xs text-gray-500 text-center max-w-md">
+              This will backup or restore all agents and notebooks owned by you in the current target project and location.
+              Backups use a fixed filename and will overwrite previous versions.
+            </div>
           </div>
-
         </div>
 
         {/* Logs Section */}
@@ -1449,7 +1860,6 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken: _, projectNumber, 
             </pre>
           </div>
         )}
-      </div>
     </div>
   );
 };

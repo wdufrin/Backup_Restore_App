@@ -71,3 +71,44 @@ export default defineConfig([
   },
 ])
 ```
+
+## IAM Configuration for Workforce Identity (Entra ID / Okta)
+
+To allow users logging in via Workforce Identity Federation (like Entra ID) to use the self-service backup and restore features without granting them full project administrator rights, you must create a custom IAM role and assign it to them.
+
+### 1. Create Custom Role
+Create a custom role named `customBackupViewer` at the project level with the following permissions:
+
+- `discoveryengine.engines.list`
+- `discoveryengine.engines.get`
+- `discoveryengine.assistants.list`
+- `discoveryengine.assistants.get`
+- `discoveryengine.agents.list`
+- `discoveryengine.agents.get`
+- `discoveryengine.agents.manage` (Required for listing agents in v1alpha)
+- `discoveryengine.agents.getIamPolicy` (Required for ownership verification)
+- `discoveryengine.notebooks.list`
+- `discoveryengine.notebooks.get`
+
+You can create it using `gcloud`:
+
+```bash
+gcloud iam roles create customBackupViewer \
+    --project=ancient-sandbox-322523 \
+    --title="Discovery Engine Custom Backup Viewer" \
+    --description="Read-only access to list engines, assistants, agents, and notebooks for backup purposes." \
+    --permissions="discoveryengine.engines.list,discoveryengine.engines.get,discoveryengine.assistants.list,discoveryengine.assistants.get,discoveryengine.agents.list,discoveryengine.agents.get,discoveryengine.agents.manage,discoveryengine.agents.getIamPolicy,discoveryengine.notebooks.list,discoveryengine.notebooks.get" \
+    --stage=GA
+```
+
+### 2. Assign Role to Users/Groups
+Grant this custom role to your Workforce Principal or Group:
+
+```bash
+gcloud projects add-iam-policy-binding ancient-sandbox-322523 \
+    --member="principalSet://iam.googleapis.com/locations/global/workforcePools/wdufrin-entra/group/0b996e92-feda-493f-856b-19dc426d75c5" \
+    --role="projects/ancient-sandbox-322523/roles/customBackupViewer"
+```
+
+### 3. Note on Permission Check
+The application performs a permission check by attempting to list engines. If it fails, it will show a red **FAIL** status in the UI. Ensure the project ID is set in the settings (Active Project dropdown) to run the check.

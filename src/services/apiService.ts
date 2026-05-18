@@ -840,6 +840,7 @@ export const signInWithOidcPopup = (
                     let email: string | undefined;
                     try {
                         const payload = JSON.parse(atob(idToken.split('.')[1]));
+                        console.log("[DEBUG] ID Token Payload:", payload);
                         email = payload.email || payload.preferred_username || payload.upn;
                     } catch { /* ignore decode errors */ }
 
@@ -2240,4 +2241,17 @@ export const createPromptChip = async (engineName: string, payload: any) => {
     const url = `${baseUrl}/v1alpha/${engineName}/assistants/default_assistant/cannedQueries`;
 
     return gapiRequest<any>(url, 'POST', projectId, { cannedQueryId: chipName }, payload);
+};
+
+export const getUserInfo = async (accessToken: string) => {
+    const url = 'https://www.googleapis.com/oauth2/v3/userinfo';
+    const response = await fetch(url, {
+        headers: {
+            'Authorization': `Bearer ${accessToken}`
+        }
+    });
+    if (!response.ok) {
+        throw new Error(`Failed to fetch user info: ${response.statusText}`);
+    }
+    return response.json();
 };

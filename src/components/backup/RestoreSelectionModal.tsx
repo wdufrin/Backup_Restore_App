@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 
 // A generic item with a unique name and a display name
-interface SelectableItem {
+export interface SelectableItem {
   name: string;
   displayName: string;
   agentType?: string; // Optional property for displaying agent type
@@ -34,6 +34,8 @@ interface RestoreSelectionModalProps {
   items: SelectableItem[];
   isLoading: boolean;
   showIdInput?: boolean;
+  subtitle?: string;
+  actionLabel?: string;
 }
 
 const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
@@ -42,8 +44,10 @@ const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
   onConfirm,
   title,
   items,
+  actionLabel,
   isLoading,
   showIdInput = false,
+  subtitle,
 }) => {
   const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set());
   const [customIds, setCustomIds] = useState<Record<string, string>>({});
@@ -96,7 +100,7 @@ const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col border border-gray-200">
         <header className="p-6 border-b border-gray-100">
           <h2 className="text-lg font-bold text-gray-900">{title}</h2>
-          <p className="text-sm text-gray-500 mt-1">Select the items you wish to restore from the backup file.</p>
+          <p className="text-sm text-gray-500 mt-1">{subtitle || 'Select the items you wish to restore from the backup file.'}</p>
         </header>
 
         <div className="p-6 flex-1 overflow-y-auto bg-gray-50">
@@ -163,7 +167,7 @@ const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
             disabled={isLoading || selectedNames.size === 0}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed shadow-sm"
           >
-            {isLoading ? 'Restoring...' : `Restore ${selectedNames.size} Item(s)`}
+            {isLoading ? 'Processing...' : `${actionLabel || 'Restore'} ${selectedNames.size} Item(s)`}
           </button>
         </footer>
       </div>
