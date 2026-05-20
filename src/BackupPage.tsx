@@ -26,6 +26,7 @@ import ClientSecretPrompt from './components/backup/ClientSecretPrompt';
 import CurlInfoModal from './components/CurlInfoModal';
 
 
+
 interface BackupPageProps {
   accessToken: string;
   projectNumber: string;
@@ -103,10 +104,124 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
     targetProject: '',
     targetLocation: 'global',
     targetAppId: '',
+    targetAppUrl: '',
   });
   const [isUserConfigModalOpen, setIsUserConfigModalOpen] = useState(false);
   const [sourceApps, setSourceApps] = useState<any[]>([]);
   const [targetApps, setTargetApps] = useState<any[]>([]);
+  const [sourceDatastores, setSourceDatastores] = useState<any[]>([]);
+  const [targetDatastores, setTargetDatastores] = useState<any[]>([]);
+  const [isLoadingSourceDatastores, setIsLoadingSourceDatastores] = useState(false);
+  const [isLoadingTargetDatastores, setIsLoadingTargetDatastores] = useState(false);
+  const [datastoreMapping, setDatastoreMapping] = useState<Record<string, string>>({});
+  const [sourceCollections, setSourceCollections] = useState<any[]>([]);
+  const [targetCollections, setTargetCollections] = useState<any[]>([]);
+  const [collectionMapping, setCollectionMapping] = useState<Record<string, string>>({});
+  const [isStep1Complete, setIsStep1Complete] = useState(false);
+  const [isRestoreComplete, setIsRestoreComplete] = useState(false);
+
+  const fetchDataAssets = async (project: string, location: string) => {
+    const configOverride = { ...apiConfig, projectId: project, appLocation: location };
+    const allDatastores: any[] = [];
+    const collectionsWithConnectors: any[] = [];
+
+    try {
+      addLog(`Fetching collections for project ${project}...`);
+      const collectionsResponse = await api.listResources('collections', configOverride);
+      const collections = collectionsResponse.collections || [];
+      addLog(`Found ${collections.length} collections. Checking for connectors...`);
+      
+      for (const col of collections) {
+        const collectionId = col.name.split('/').pop()!;
+        const colConfig = { ...configOverride, collectionId };
+
+        // Check for Data Connector
+        let isConnector = false;
+        try {
+          const connector = await api.getDataConnector(colConfig);
+          if (connector) {
+            isConnector = true;
+            collectionsWithConnectors.push(col);
+            addLog(`  - Collection ${collectionId} has a Data Connector.`);
+          }
+        } catch (e) {
+          // Ignore 404 or other errors implying no connector
+        }
+
+        // List DataStores in this collection
+        try {
+          const dsResponse = await api.listResources('dataStores', colConfig);
+          const dataStores = dsResponse.dataStores || [];
+          // Add collection info to datastores for later filtering
+          dataStores.forEach((ds: any) => {
+            ds.collectionId = collectionId;
+            ds.isConnector = isConnector;
+          });
+          allDatastores.push(...dataStores);
+        } catch (dsErr) {
+          addLog(`Error fetching datastores for collection ${collectionId}: ${(dsErr as any).message}`);
+        }
+      }
+      
+      return { datastores: allDatastores, collections: collectionsWithConnectors };
+    } catch (err: any) {
+      addLog(`Error fetching data assets: ${err.message}`);
+      return { datastores: [], collections: [] };
+    }
+  };
+  const exportAdminConfig = () => {
+    const configToExport = {
+      userTabConfig,
+      datastoreMapping,
+      collectionMapping,
+    };
+    const jsonStr = JSON.stringify(configToExport, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `admin_config__${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const importAdminConfig = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const json = JSON.parse(e.target?.result as string);
+        if (json.userTabConfig) {
+          setUserTabConfig(json.userTabConfig);
+          
+          // Automatically fetch apps for source and target projects
+          if (json.userTabConfig.sourceProject) {
+            const sourceLoc = json.userTabConfig.sourceLocation || 'global';
+            fetchAppsForProject(json.userTabConfig.sourceProject, sourceLoc).then(apps => setSourceApps(apps));
+          }
+          if (json.userTabConfig.targetProject) {
+            const targetLoc = json.userTabConfig.targetLocation || 'global';
+            fetchAppsForProject(json.userTabConfig.targetProject, targetLoc).then(apps => setTargetApps(apps));
+          }
+        }
+        if (json.datastoreMapping) {
+          setDatastoreMapping(json.datastoreMapping);
+        }
+        if (json.collectionMapping) {
+          setCollectionMapping(json.collectionMapping);
+        }
+        addLog(`Admin configuration imported successfully from ${file.name}`);
+      } catch (err: any) {
+        addLog(`Error importing admin configuration: ${err.message}`);
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const [isLoadingSourceApps, setIsLoadingSourceApps] = useState(false);
   const [isLoadingTargetApps, setIsLoadingTargetApps] = useState(false);
   const [isDebugMode, setIsDebugMode] = useState(false);
@@ -161,6 +276,21 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
       return newSet;
     });
   };
+
+  interface ManualActionReportItem {
+    agentName?: string;
+    notebookTitle?: string;
+    sharedWith: string[];
+    unmappedDatastores?: string[];
+    knowledgeAttachments?: string[];
+    localFiles?: string[];
+    agentFiles?: string[];
+  }
+
+  const [manualActionReport, setManualActionReport] = useState<ManualActionReportItem[]>([]);
+
+
+
 
   const [userIdStatus, setUserIdStatus] = useState<{ status: 'pass' | 'fail' | 'pending', details?: string }>({ status: 'pending' });
   const [isIdCheckExpanded, setIsIdCheckExpanded] = useState(false);
@@ -378,7 +508,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
       projectId: projectNumber,
   }), [config, projectNumber]);
 
-  const fetchAppsForProject = async (projectId: string, location: string): Promise<any[]> => {
+  async function fetchAppsForProject(projectId: string, location: string): Promise<any[]> {
     if (!projectId) return [];
     try {
       const mockConfig = {
@@ -727,6 +857,8 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
       try {
         const rawNotebook = await api.getNotebook(apiConfig, notebookId);
 
+
+
         // Loop through the sources to pull full metadata
         const fullSources = [];
         for (const source of (rawNotebook.sources || [])) {
@@ -935,6 +1067,8 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
         throw new Error(`Invalid backup file type. Expected 'UserBackup', but found '${backupData.type}'.`);
       }
 
+      // Connector validation removed as per user request
+
       addLog(`Backup file loaded. Created at: ${backupData.createdAt}`);
 
       // Fetch target resources for validation
@@ -974,7 +1108,8 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
       });
 
       const notebookItems: SelectableItem[] = (backupData.notebooks || []).map((nb: any) => {
-        const exists = targetNotebookTitles.has(nb.title);
+        const targetTitle = `${nb.title || 'Restored Notebook'} (Restored)`;
+        const exists = targetNotebookTitles.has(nb.title) || targetNotebookTitles.has(targetTitle);
         return {
           name: nb.name,
           displayName: nb.title || 'Unnamed Notebook',
@@ -1050,10 +1185,28 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
         // 2. Restore Notebooks
         if (filteredNotebooks.length > 0) {
           addLog(`Restoring ${filteredNotebooks.length} notebooks to ${targetConfig.appId}...`);
+          
+          addLog(`Checking for existing notebooks in target...`);
+          let existingNotebooks: any[] = [];
+          try {
+            const listResponse = await api.listNotebooks(targetConfig);
+            existingNotebooks = listResponse.notebooks || [];
+          } catch (listErr: any) {
+            addLog(`Warning: Could not list existing notebooks in target: ${listErr.message}`);
+          }
+
           for (const nb of filteredNotebooks) {
+            const targetTitle = `${nb.title || 'Restored Notebook'} (Restored)`;
+            
+            const alreadyExists = existingNotebooks.some((n: any) => n.title === targetTitle);
+            if (alreadyExists) {
+              addLog(`  - Skipping notebook "${nb.title}" (already restored)`);
+              continue;
+            }
+
             try {
               const payload = {
-                title: `${nb.title || 'Restored Notebook'} (Restored)`,
+                title: targetTitle,
                 metadata: nb.metadata
               };
               const newNotebook = await api.createNotebook(targetConfig, payload);
@@ -1070,9 +1223,202 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
             }
           }
         }
+
+        // Compile Manual Action Report
+        const report: ManualActionReportItem[] = [];
+        
+        for (const agent of filteredAgents) {
+          const dataStoreConnections = (agent as any).dataStoreConnections;
+          const iamPolicy = (agent as any).iamPolicy;
+          
+          const sharedWith: string[] = [];
+          const userEmail = pendingBackupData?.userEmail;
+          
+          if (iamPolicy && iamPolicy.bindings) {
+            for (const binding of iamPolicy.bindings) {
+              // Skip owner role as requested by user
+              if (binding.role === 'roles/discoveryengine.agentOwner') {
+                continue;
+              }
+              if (binding.members) {
+                const filteredMembers = binding.members.filter((member: string) => {
+                  return !userEmail || !member.includes(userEmail);
+                });
+                sharedWith.push(...filteredMembers);
+              }
+            }
+          }
+
+          const unmappedDatastores: string[] = [];
+          const knowledgeAttachments: string[] = [];
+          if (dataStoreConnections && dataStoreConnections.length > 0) {
+            for (const conn of dataStoreConnections) {
+              if (conn.dataStore) {
+                const oldDsId = conn.dataStore.split('/').pop();
+                if (oldDsId) {
+                  knowledgeAttachments.push(oldDsId);
+                  if (!datastoreMapping[oldDsId]) {
+                    unmappedDatastores.push(oldDsId);
+                  }
+                }
+              }
+            }
+          }
+
+          const agentFiles: string[] = [];
+          
+          // Find definition keys (like workflowAgentDefinition) that contain the files
+          const definitionKeys = Object.keys(agent).filter(key => key.toLowerCase().includes('agentdefinition'));
+          
+          for (const key of definitionKeys) {
+            const definition = (agent as any)[key];
+            if (definition) {
+              const files = definition.deployedAgentFiles || definition.agentFiles;
+              if (files && files.length > 0) {
+                for (const file of files) {
+                  if (file.fileName) {
+                    agentFiles.push(file.fileName);
+                  }
+                }
+              }
+            }
+          }
+          
+          report.push({
+            agentName: agent.displayName,
+            sharedWith: Array.from(new Set(sharedWith)),
+            unmappedDatastores: unmappedDatastores,
+            knowledgeAttachments: knowledgeAttachments,
+            agentFiles: agentFiles,
+          });
+        }
+
+        // Compile Manual Action Report for Notebooks
+        for (const nb of filteredNotebooks) {
+          const sharedWith: string[] = [];
+          const userEmail = pendingBackupData?.userEmail;
+          const iamPolicy = (nb as any).iamPolicy;
+          
+          if (iamPolicy && iamPolicy.bindings) {
+            for (const binding of iamPolicy.bindings) {
+              if (binding.role === 'roles/discoveryengine.agentOwner') {
+                continue;
+              }
+              if (binding.members) {
+                const filteredMembers = binding.members.filter((member: string) => {
+                  return !userEmail || !member.includes(userEmail);
+                });
+                sharedWith.push(...filteredMembers);
+              }
+            }
+          }
+
+          const localFiles: string[] = [];
+          if (nb.sources && nb.sources.length > 0) {
+            for (const source of nb.sources) {
+              if (source.metadata?.agentspaceMetadata) {
+                localFiles.push(source.metadata.agentspaceMetadata.documentName || source.title || 'Unnamed File');
+              } else if (!source.metadata?.googleDocsMetadata && !source.metadata?.youtubeMetadata && !source.metadata?.webpageMetadata && !source.url && !source.webScrapeConfig) {
+                localFiles.push(source.title || source.displayName || 'Unsupported Source');
+              }
+            }
+          }
+
+          report.push({
+            notebookTitle: nb.title || nb.displayName || 'Unnamed Notebook',
+            sharedWith: Array.from(new Set(sharedWith)),
+            localFiles: localFiles,
+          });
+        }
+        
+        setManualActionReport(report);
+        // Removed setIsStepsDrawerOpen(true) as per user request to use Step 3 instead
+        if (report.length > 0) {
+          addLog(`Generated manual action report with ${report.length} items.`);
+        }
+
         addLog(`Restore complete!`);
+        setIsRestoreComplete(true);
       });
     }
+  };
+
+  const downloadStepsAsText = () => {
+    let content = "Post-Restore Steps\n";
+    content += "==================\n\n";
+    content += "Please complete the following manual steps to finalize your restoration.\n\n";
+
+    manualActionReport.forEach(item => {
+      if (item.agentName) {
+        content += `🤖 Agent: "${item.agentName}"\n`;
+        content += `----------------------------------------\n`;
+        content += `- Status: All restored agents are in draft and will need to be created/published.\n`;
+        
+        if (item.sharedWith && item.sharedWith.length > 0) {
+          content += `- Sharing: Please reshare this agent with:\n`;
+          item.sharedWith.forEach(email => {
+            content += `    * ${email}\n`;
+          });
+        } else {
+          content += `- Sharing: No sharing permissions found in backup.\n`;
+        }
+
+        if (item.knowledgeAttachments && item.knowledgeAttachments.length > 0) {
+          content += `- Knowledge Attachments:\n`;
+          item.knowledgeAttachments.forEach(dsId => {
+            content += `    * ${dsId}\n`;
+          });
+        }
+
+        if (item.agentFiles && item.agentFiles.length > 0) {
+          content += `- Knowledge Files:\n`;
+          item.agentFiles.forEach(fileName => {
+            content += `    * ${fileName}\n`;
+          });
+        }
+
+        if (item.unmappedDatastores && item.unmappedDatastores.length > 0) {
+          content += `- Unmapped Datastores: The following datastores could not be remapped and need manual review:\n`;
+          item.unmappedDatastores.forEach(dsId => {
+            content += `    * ${dsId}\n`;
+          });
+        } else {
+          content += `- Datastores: All datastores were successfully mapped or none were attached.\n`;
+        }
+      } else {
+        content += `📓 Notebook: "${item.notebookTitle}"\n`;
+        content += `----------------------------------------\n`;
+        content += `- Status: Notebook restored. Please check sources and sharing.\n`;
+        if (item.sharedWith && item.sharedWith.length > 0) {
+          content += `- Sharing: Please reshare this notebook with:\n`;
+          item.sharedWith.forEach(email => {
+            content += `    * ${email}\n`;
+          });
+        } else {
+          content += `- Sharing: Please re-share this notebook with the appropriate users manually.\n`;
+        }
+
+        if (item.localFiles && item.localFiles.length > 0) {
+          content += `- Local Files: The following local files were attached to the original notebook and need to be re-added manually:\n`;
+          item.localFiles.forEach(file => {
+            content += `    * ${file}\n`;
+          });
+        } else {
+          content += `- Local Files: No local files detected or all sources are external.\n`;
+        }
+      }
+      content += `\n`;
+    });
+
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `post_restore_steps.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   // --- Restore Handlers & Processors ---
@@ -1168,9 +1514,15 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
           .filter(text => text)
           .map(text => ({ text }));
 
+        // Prefix display name with [Replace] if it has data store connections (knowledge files)
+        let restoredDisplayName = currentAgent.displayName;
+        if ((currentAgent as any).dataStoreConnections && (currentAgent as any).dataStoreConnections.length > 0) {
+          restoredDisplayName = `[Replace] ${restoredDisplayName}`;
+        }
+
         // Base payload
         const payload: any = {
-          displayName: currentAgent.displayName,
+          displayName: restoredDisplayName,
           description: currentAgent.description || '',
           icon: currentAgent.icon || undefined,
           starterPrompts: finalStarterPrompts.length > 0 ? finalStarterPrompts : undefined,
@@ -1184,6 +1536,56 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
           if (!blacklist.includes(key) && !(key in payload)) {
             payload[key] = (currentAgent as any)[key];
           }
+        }
+
+        // Rewrite DataStore connections based on mapping
+        if (payload.dataStoreConnections) {
+          const rewrittenConnections = payload.dataStoreConnections.map((conn: any) => {
+            if (conn.dataStore) {
+              const parts = conn.dataStore.split('/');
+              const colIndex = parts.indexOf('collections');
+              const oldColId = colIndex !== -1 ? parts[colIndex + 1] : 'default_collection';
+              
+              const oldDsId = conn.dataStore.split('/').pop();
+              
+              const targetProject = restoreConfig.projectId;
+              const targetLocation = restoreConfig.appLocation || 'global';
+              
+              let targetCollection = 'default_collection';
+              if (oldColId && collectionMapping[oldColId]) {
+                targetCollection = collectionMapping[oldColId];
+                if (isDebugMode) {
+                  addLog(`    - [DEBUG] Root Connection: Remapping collection ${oldColId} -> ${targetCollection}`);
+                }
+              }
+              
+              let newDsId = oldDsId;
+              if (oldDsId && datastoreMapping[oldDsId]) {
+                newDsId = datastoreMapping[oldDsId];
+                if (isDebugMode) {
+                  addLog(`    - [DEBUG] Root Connection: Remapping datastore ${oldDsId} -> ${newDsId}`);
+                }
+              }
+              
+              return {
+                ...conn,
+                dataStore: `projects/${targetProject}/locations/${targetLocation}/collections/${targetCollection}/dataStores/${newDsId}`
+              };
+            }
+            return conn;
+          });
+
+          // Deduplicate based on dataStore path
+          const seenDataStores = new Set<string>();
+          payload.dataStoreConnections = rewrittenConnections.filter((conn: any) => {
+            if (conn.dataStore) {
+              if (seenDataStores.has(conn.dataStore)) {
+                return false; // Duplicate
+              }
+              seenDataStores.add(conn.dataStore);
+            }
+            return true;
+          });
         }
 
         // Rewrite Authorizations to the NEW project/location
@@ -1234,9 +1636,45 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
             if (sourceConfig && sourceConfig.projectId && restoreConfig.projectId) {
               defStr = defStr.split(sourceConfig.projectId).join(restoreConfig.projectId);
             }
+
+            // Replace old project number if present in agent name
+            const oldProjectNumber = nameParts[1]; // projects/{number}/...
+            if (oldProjectNumber && restoreConfig.projectId) {
+              defStr = defStr.split(oldProjectNumber).join(restoreConfig.projectId);
+            }
             if (sourceConfig && sourceConfig.appLocation && restoreConfig.appLocation) {
               defStr = defStr.split(sourceConfig.appLocation).join(restoreConfig.appLocation);
             }
+
+            // Replace old location from agent name if present
+            const oldLocation = nameParts[3]; // projects/{number}/locations/{location}/...
+            if (oldLocation && restoreConfig.appLocation) {
+              defStr = defStr.split(`/locations/${oldLocation}/`).join(`/locations/${restoreConfig.appLocation}/`);
+            }
+
+            // Apply collection mapping (sorted by length descending)
+            Object.entries(collectionMapping)
+              .sort((a, b) => b[0].length - a[0].length)
+              .forEach(([oldColId, newColId]) => {
+                if (defStr.includes(`/collections/${oldColId}/`)) {
+                  if (isDebugMode) {
+                    addLog(`    - [DEBUG] Remapping collection in definition: ${oldColId} -> ${newColId}`);
+                  }
+                  defStr = defStr.split(`/collections/${oldColId}/`).join(`/collections/${newColId}/`);
+                }
+              });
+
+            // Apply datastore mapping (sorted by length descending)
+            Object.entries(datastoreMapping)
+              .sort((a, b) => b[0].length - a[0].length)
+              .forEach(([oldDsId, newDsId]) => {
+                if (defStr.includes(`/dataStores/${oldDsId}`)) {
+                  if (isDebugMode) {
+                    addLog(`    - [DEBUG] Remapping datastore in definition: ${oldDsId} -> ${newDsId}`);
+                  }
+                  defStr = defStr.split(`/dataStores/${oldDsId}`).join(`/dataStores/${newDsId}`);
+                }
+              });
             
             if (isDebugMode) {
               addLog(`[DEBUG] Agent ${currentAgent.displayName} - Payload AFTER replacement: ${defStr}`);
@@ -1515,6 +1953,32 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
       { section: 'NotebookLM', title: 'NotebookLMs', scope: 'User Specific', backupHandler: handleBackupNotebooks, restoreProcessor: processRestoreNotebooks },
   ];
 
+  const selectedSourceApp = sourceApps.find(app => app.name.split('/').pop() === userTabConfig.sourceAppId);
+  const allowedSourceDsIds = selectedSourceApp?.dataStoreIds || [];
+  const filteredSourceDatastores = userTabConfig.sourceAppId
+    ? sourceDatastores.filter(ds => allowedSourceDsIds.includes(ds.name.split('/').pop()))
+    : [];
+
+  const selectedTargetApp = targetApps.find(app => app.name.split('/').pop() === userTabConfig.targetAppId);
+  const allowedTargetDsIds = selectedTargetApp?.dataStoreIds || [];
+  const filteredTargetDatastores = userTabConfig.targetAppId
+    ? targetDatastores.filter(ds => allowedTargetDsIds.includes(ds.name.split('/').pop()))
+    : [];
+
+  const collectionsInUse = new Set<string>();
+  Object.keys(datastoreMapping).forEach(dsId => {
+    if (dsId.includes('-federated_') || dsId.includes('-connector_')) {
+      const colMatch = dsId.match(/^([^-]+-(?:federated|connector)_\d{13})/);
+      if (colMatch) {
+        collectionsInUse.add(colMatch[1]);
+      }
+    }
+  });
+
+  const filteredSourceCollections = collectionsInUse.size > 0
+    ? sourceCollections.filter(col => collectionsInUse.has(col.name.split('/').pop()!))
+    : sourceCollections;
+
   return (
     <div className="max-w-7xl mx-auto p-6 text-gray-900">
       {/* Modals */}
@@ -1580,6 +2044,8 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
           actionLabel={selectionModalAction === 'backup' ? 'Backup' : 'Restore'}
         />
       )}
+
+
 
       {isUserConfigModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -1743,6 +2209,32 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
         </div>
       )}
 
+      <div className="mb-6 border-b border-gray-200">
+        <nav className="-mb-px flex space-x-8" aria-label="Tabs">
+          <button
+            onClick={() => setActiveTab('user')}
+            className={`${
+              activeTab === 'user'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm font-semibold transition-colors`}
+          >
+            User View
+          </button>
+          <button
+            onClick={() => setActiveTab('admin')}
+            className={`${
+              activeTab === 'admin'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm font-semibold transition-colors`}
+          >
+            Admin View
+          </button>
+        </nav>
+      </div>
+
+      {activeTab === 'user' && (
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 relative">
           <h2 className="text-lg font-bold text-gray-900 mb-4">My Backups</h2>
           <p className="text-sm text-gray-500 mb-4">Manage backups and restores for your personal agents and notebooks.</p>
@@ -1795,57 +2287,552 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
             </label>
           </div>
 
-          <div className="flex flex-col items-center justify-center py-8 space-y-6">
-            <div className="w-full max-w-md mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Upload Backup File for Restore</label>
+          {/* Step 1: Connector Authentication */}
+          <div className="mb-6 p-4 rounded-lg border border-gray-200 bg-gray-50">
+            <h3 className="text-sm font-semibold text-gray-700 mb-2">Step 1: Authenticate Connectors</h3>
+            <div className="mb-3">
+              <p className="text-xs text-gray-600 mb-3">
+                Log into the target Gemini Enterprise app and ensure all required federated connectors (SharePoint, OneDrive, Outlook, etc.) are authenticated.
+              </p>
+              {userTabConfig.targetProject && (
+                <a 
+                  href={userTabConfig.targetAppUrl || "https://vertexaisearch.cloud.google.com/"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-md flex items-center justify-center gap-2"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                  <span>Open Gemini Enterprise</span>
+                </a>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
               <input 
-                type="file" 
-                accept=".json"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    const reader = new FileReader();
-                    reader.onload = (event) => {
-                      setRestoreFileContent(event.target?.result as string);
-                      addLog(`File selected: ${file.name}`);
-                    };
-                    reader.readAsText(file);
-                  }
-                }}
-                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                type="checkbox" 
+                id="step1Auth" 
+                checked={isStep1Complete} 
+                onChange={(e) => setIsStep1Complete(e.target.checked)}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
               />
-            </div>
-
-            <div className="flex gap-6">
-              <button
-                onClick={handleUserBackupCombined}
-                disabled={isLoading || !userTabConfig.sourceProject}
-                className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-md transition-colors disabled:bg-gray-300 flex items-center gap-2"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                </svg>
-                Backup My Data
-              </button>
-              
-              <button
-                onClick={handleUserRestoreCombined}
-                disabled={isLoading || !restoreFileContent || !userTabConfig.targetProject}
-                className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-xl shadow-md transition-colors disabled:bg-gray-300 flex items-center gap-2"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                Restore My Data
-              </button>
-            </div>
-            
-            <div className="text-xs text-gray-500 text-center max-w-md">
-              This will backup or restore all agents and notebooks owned by you in the current target project and location.
-              Backups use a fixed filename and will overwrite previous versions.
+              <label htmlFor="step1Auth" className="text-sm text-gray-700 font-medium cursor-pointer">
+                I have authenticated all required connectors in the target environment.
+              </label>
             </div>
           </div>
+
+          {/* Step 2: Backup & Restore */}
+          <div className={`mb-6 p-4 rounded-lg border ${isStep1Complete ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50 opacity-50'}`}>
+            <h3 className="text-sm font-semibold text-gray-700 mb-2">Step 2: Backup or Restore</h3>
+            
+            <div className="flex flex-col items-center justify-center py-4 space-y-6">
+              <div className="w-full max-w-md mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Upload Backup File for Restore</label>
+                <input 
+                  type="file" 
+                  accept=".json"
+                  disabled={!isStep1Complete}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onload = (e) => {
+                        setRestoreFileContent(e.target?.result as string);
+                        addLog(`File selected: ${file.name}`);
+                      };
+                      reader.readAsText(file);
+                    }
+                  }}
+                  className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 disabled:file:bg-gray-100 disabled:file:text-gray-400"
+                />
+              </div>
+
+              <div className="flex gap-6">
+                <button
+                  onClick={handleUserBackupCombined}
+                  disabled={isLoading || !userTabConfig.sourceProject || !isStep1Complete}
+                  className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-md transition-colors disabled:bg-gray-300 flex items-center gap-2"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                  </svg>
+                  Backup My Data
+                </button>
+                
+                <button
+                  onClick={handleUserRestoreCombined}
+                  disabled={isLoading || !restoreFileContent || !userTabConfig.targetProject || !isStep1Complete}
+                  className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-xl shadow-md transition-colors disabled:bg-gray-300 flex items-center gap-2"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Restore My Data
+                </button>
+              </div>
+              
+              <div className="text-xs text-gray-500 text-center max-w-md">
+                This will backup or restore all agents and notebooks owned by you in the current target project and location.
+              </div>
+            </div>
+          </div>
+
+          {/* Step 3: Finalization */}
+          <div className={`mb-6 p-4 rounded-lg border ${isRestoreComplete ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50 opacity-50'}`}>
+            <h3 className="text-sm font-semibold text-gray-700 mb-2">Step 3: Complete Setup</h3>
+            
+            {!isRestoreComplete ? (
+              <p className="text-xs text-gray-600">
+                After restore completes, manual steps required to finalize your agents will appear here.
+              </p>
+            ) : (
+              <div className="space-y-4">
+                <p className="text-xs text-gray-600 mb-3">
+                  Please complete the following manual steps to finalize your restoration.
+                </p>
+                
+                <div className="space-y-4">
+                  {manualActionReport.map((item, idx) => (
+                    <div key={idx} className="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm space-y-3">
+                      <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                        {item.agentName ? (
+                          <><span className="text-blue-500">🤖</span> {item.agentName}</>
+                        ) : (
+                          <><span className="text-green-500">📓</span> {item.notebookTitle}</>
+                        )}
+                      </h3>
+                      
+                      {item.agentName ? (
+                        <>
+                          <div className="text-xs text-gray-600">
+                            <p className="font-medium text-yellow-700 bg-yellow-50 p-2 rounded-lg border border-yellow-100">
+                              ℹ️ All restored agents are in draft and will need to be created/published.
+                            </p>
+                          </div>
+
+                          {item.sharedWith && item.sharedWith.length > 0 ? (
+                            <div>
+                              <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                                <span className="text-purple-500">👥</span> Reshare with:
+                              </h4>
+                              <div className="flex flex-wrap gap-1">
+                                {item.sharedWith.map((user, uidx) => (
+                                  <span key={uidx} className="px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded text-[10px] font-medium">
+                                    {user}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-xs text-gray-500 flex items-center gap-1">
+                              <span className="text-purple-300">👥</span> No sharing permissions found in backup.
+                            </div>
+                          )}
+
+                          {item.knowledgeAttachments && item.knowledgeAttachments.length > 0 && (
+                            <div>
+                              <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                                <span className="text-blue-500">📚</span> Knowledge Attachments:
+                              </h4>
+                              <ul className="space-y-1 text-xs text-gray-600">
+                                {item.knowledgeAttachments.map((dsId, dsIdx) => (
+                                  <li key={dsIdx} className="font-mono text-gray-500 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 inline-block mr-1 mb-1">
+                                    {dsId}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
+                          {item.agentFiles && item.agentFiles.length > 0 && (
+                            <div>
+                              <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                                <span className="text-blue-500">📄</span> Knowledge Files:
+                              </h4>
+                              <ul className="space-y-1 text-xs text-gray-600">
+                                {item.agentFiles.map((fileName, fIdx) => (
+                                  <li key={fIdx} className="text-gray-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 inline-block mr-1 mb-1">
+                                    {fileName}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
+                          {item.unmappedDatastores && item.unmappedDatastores.length > 0 ? (
+                            <div>
+                              <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                                <span className="text-red-500">📦</span> Unmapped Datastores (Action Required):
+                              </h4>
+                              <ul className="space-y-1 text-xs text-gray-600">
+                                {item.unmappedDatastores.map((dsId, dsIdx) => (
+                                  <li key={dsIdx} className="font-mono text-gray-500 bg-red-50 px-1.5 py-0.5 rounded border border-red-100 inline-block mr-1 mb-1">
+                                    {dsId}
+                                  </li>
+                                ))}
+                              </ul>
+                              <p className="text-[10px] text-red-500 mt-1">
+                                These datastores were not able to be remapped to new datastores and will need to be reviewed and manually re-added.
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="text-xs text-gray-500 flex items-center gap-1">
+                              <span className="text-green-500">📦</span> All datastores successfully mapped or none attached.
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <div className="text-xs text-gray-600">
+                            <p className="font-medium text-blue-700 bg-blue-50 p-2 rounded-lg border border-blue-100">
+                              ℹ️ Notebook restored. Please check sources and sharing.
+                            </p>
+                          </div>
+
+                          {item.sharedWith && item.sharedWith.length > 0 ? (
+                            <div>
+                              <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                                <span className="text-purple-500">👥</span> Reshare with:
+                              </h4>
+                              <div className="flex flex-wrap gap-1">
+                                {item.sharedWith.map((user, uidx) => (
+                                  <span key={uidx} className="px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded text-[10px] font-medium">
+                                    {user}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <div>
+                              <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                                <span className="text-purple-500">👥</span> Sharing:
+                              </h4>
+                              <p className="text-xs text-gray-600">
+                                Please re-share this notebook with the appropriate users manually.
+                              </p>
+                            </div>
+                          )}
+
+                          {item.localFiles && item.localFiles.length > 0 ? (
+                            <div>
+                              <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                                <span className="text-yellow-500">📁</span> Local Files (Action Required):
+                              </h4>
+                              <p className="text-xs text-gray-600 mb-1">
+                                The following local files were attached to the original notebook and need to be re-added manually:
+                              </p>
+                              <ul className="space-y-1 text-xs text-gray-600">
+                                {item.localFiles.map((file, fIdx) => (
+                                  <li key={fIdx} className="text-gray-700 bg-yellow-50 px-1.5 py-0.5 rounded border border-yellow-100 inline-block mr-1 mb-1">
+                                    {file}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : (
+                            <div className="text-xs text-gray-500 flex items-center gap-1">
+                              <span className="text-yellow-300">📁</span> No local files detected or all sources are external.
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  ))}
+
+                  {manualActionReport.length === 0 && (
+                    <div className="text-center py-4 text-gray-500 text-sm">
+                      No manual steps required! All items were successfully restored.
+                    </div>
+                  )}
+                </div>
+                
+                <div className="mt-4">
+                  <button
+                    onClick={downloadStepsAsText}
+                    className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center justify-center gap-2"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    Download Steps
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
+      )}
+
+      {activeTab === 'admin' && (
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 relative">
+          <h2 className="text-lg font-bold text-gray-900 mb-4">Admin Configuration</h2>
+          <p className="text-sm text-gray-500 mb-4">Configure source and target environments and map datastores.</p>
+          
+          <div className="flex justify-end gap-2 mb-4">
+            <button
+              onClick={exportAdminConfig}
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-1"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Export Config
+            </button>
+            <label className="px-3 py-1.5 bg-white hover:bg-gray-50 text-gray-700 text-xs font-semibold rounded-lg border border-gray-300 transition-colors shadow-sm cursor-pointer flex items-center gap-1">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+              Import Config
+              <input type="file" accept=".json" onChange={importAdminConfig} className="hidden" />
+            </label>
+          </div>
+          <div className="space-y-6">
+            {/* Source Config */}
+            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">Source Environment</h3>
+              <div className="grid grid-cols-4 gap-4 items-end">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Project ID</label>
+                  <div className="flex gap-1">
+                    <input type="text" value={userTabConfig.sourceProject} onChange={(e) => setUserTabConfig(prev => ({ ...prev, sourceProject: e.target.value }))} className="bg-white border border-gray-300 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500" />
+                    <button 
+                      onClick={async () => {
+                        setIsLoadingSourceApps(true);
+                        const apps = await fetchAppsForProject(userTabConfig.sourceProject, userTabConfig.sourceLocation);
+                        setSourceApps(apps);
+                        setIsLoadingSourceApps(false);
+                      }}
+                      disabled={isLoadingSourceApps || !userTabConfig.sourceProject}
+                      className="px-2 py-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-semibold rounded-lg disabled:bg-gray-300 shadow-sm"
+                    >
+                      {isLoadingSourceApps ? '...' : 'Load'}
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Location</label>
+                  <select value={userTabConfig.sourceLocation} onChange={(e) => setUserTabConfig(prev => ({ ...prev, sourceLocation: e.target.value }))} className="bg-white border border-gray-300 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500">
+                    <option value="global">global</option>
+                    <option value="eu">eu</option>
+                    <option value="us">us</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">App ID</label>
+                  {sourceApps.length > 0 ? (
+                    <select 
+                      value={userTabConfig.sourceAppId} 
+                      onChange={(e) => setUserTabConfig(prev => ({ ...prev, sourceAppId: e.target.value }))} 
+                      className="bg-white border border-gray-300 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="">Select App ...</option>
+                      {sourceApps.map(app => <option key={app.name} value={app.name.split('/').pop()}>{app.displayName || app.name.split('/').pop()}</option>)}
+                    </select>
+                  ) : (
+                    <input type="text" value={userTabConfig.sourceAppId} onChange={(e) => setUserTabConfig(prev => ({ ...prev, sourceAppId: e.target.value }))} className="bg-white border border-gray-300 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500" placeholder="Enter App ID..." />
+                  )}
+                </div>
+                <div>
+                  <button
+                    onClick={async () => {
+                      setIsLoadingSourceDatastores(true);
+                      const { datastores, collections } = await fetchDataAssets(userTabConfig.sourceProject, userTabConfig.sourceLocation);
+                      setSourceDatastores(datastores);
+                      setSourceCollections(collections);
+                      setIsLoadingSourceDatastores(false);
+                    }}
+                    disabled={isLoadingSourceDatastores || !userTabConfig.sourceProject}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed shadow-sm"
+                  >
+                    {isLoadingSourceDatastores ? 'Loading...' : 'Fetch Source Assets'}
+                  </button>
+                </div>
+              </div>
+              {sourceDatastores.length > 0 && (
+                <div className="mt-3 text-xs text-gray-600">
+                  Found {sourceDatastores.length} datastores in source.
+                </div>
+              )}
+            </div>
+
+            {/* Target Config */}
+            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">Target Environment</h3>
+              <div className="grid grid-cols-4 gap-4 items-end">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Project ID</label>
+                  <div className="flex gap-1">
+                    <input type="text" value={userTabConfig.targetProject} onChange={(e) => setUserTabConfig(prev => ({ ...prev, targetProject: e.target.value }))} className="bg-white border border-gray-300 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500" />
+                    <button 
+                      onClick={async () => {
+                        setIsLoadingTargetApps(true);
+                        const apps = await fetchAppsForProject(userTabConfig.targetProject, userTabConfig.targetLocation);
+                        setTargetApps(apps);
+                        setIsLoadingTargetApps(false);
+                      }}
+                      disabled={isLoadingTargetApps || !userTabConfig.targetProject}
+                      className="px-2 py-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-semibold rounded-lg disabled:bg-gray-300 shadow-sm"
+                    >
+                      {isLoadingTargetApps ? '...' : 'Load'}
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Location</label>
+                  <select value={userTabConfig.targetLocation} onChange={(e) => setUserTabConfig(prev => ({ ...prev, targetLocation: e.target.value }))} className="bg-white border border-gray-300 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500">
+                    <option value="global">global</option>
+                    <option value="eu">eu</option>
+                    <option value="us">us</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">App ID</label>
+                  {targetApps.length > 0 ? (
+                    <select 
+                      value={userTabConfig.targetAppId} 
+                      onChange={(e) => setUserTabConfig(prev => ({ ...prev, targetAppId: e.target.value }))} 
+                      className="bg-white border border-gray-300 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="">Select App ...</option>
+                      {targetApps.map(app => <option key={app.name} value={app.name.split('/').pop()}>{app.displayName || app.name.split('/').pop()}</option>)}
+                    </select>
+                  ) : (
+                    <input type="text" value={userTabConfig.targetAppId} onChange={(e) => setUserTabConfig(prev => ({ ...prev, targetAppId: e.target.value }))} className="bg-white border border-gray-300 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500" placeholder="Enter App ID..." />
+                  )}
+                </div>
+                <div>
+                  <button
+                    onClick={async () => {
+                      setIsLoadingTargetDatastores(true);
+                      const { datastores, collections } = await fetchDataAssets(userTabConfig.targetProject, userTabConfig.targetLocation);
+                      setTargetDatastores(datastores);
+                      setTargetCollections(collections);
+                      setIsLoadingTargetDatastores(false);
+                    }}
+                    disabled={isLoadingTargetDatastores || !userTabConfig.targetProject}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed shadow-sm"
+                  >
+                    {isLoadingTargetDatastores ? 'Loading...' : 'Fetch Target Assets'}
+                  </button>
+                </div>
+              </div>
+              <div className="mt-3">
+                <label className="block text-xs text-gray-500 mb-1">Target GE App URL (Optional - for direct link in Step 1)</label>
+                <input 
+                  type="text" 
+                  value={userTabConfig.targetAppUrl} 
+                  onChange={(e) => setUserTabConfig(prev => ({ ...prev, targetAppUrl: e.target.value }))} 
+                  className="bg-white border border-gray-300 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500" 
+                  placeholder="Enter full URL (e.g., https://vertexaisearch.cloud.google.com/home/cid/...)" 
+                />
+              </div>
+              {targetDatastores.length > 0 && (
+                <div className="mt-3 text-xs text-gray-600">
+                  Found {targetDatastores.length} datastores in target.
+                </div>
+              )}
+            </div>
+
+            {/* Collection Mapping */}
+            {filteredSourceCollections.length > 0 && (
+              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-6">
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">Collection Mapping (for Connectors)</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left text-gray-700">
+                    <thead className="text-xs text-gray-500 uppercase bg-gray-100">
+                      <tr>
+                        <th className="px-4 py-2">Source Collection</th>
+                        <th className="px-4 py-2">Target Collection</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredSourceCollections.map((srcCol) => {
+                        const srcId = srcCol.name.split('/').pop()!;
+                        return (
+                          <tr key={srcCol.name} className="border-b border-gray-100">
+                            <td className="px-4 py-2 font-mono text-xs">
+                              {srcCol.displayName || srcId} ({srcId})
+                            </td>
+                            <td className="px-4 py-2">
+                              <select
+                                value={collectionMapping[srcId] || ''}
+                                onChange={(e) => setCollectionMapping(prev => ({ ...prev, [srcId]: e.target.value }))}
+                                className="bg-white border border-gray-300 rounded-lg p-1 text-xs w-full focus:ring-blue-500 focus:border-blue-500"
+                              >
+                                <option value="">Select Target Collection...</option>
+                                {targetCollections.map((tgtCol) => {
+                                  const tgtId = tgtCol.name.split('/').pop()!;
+                                  return (
+                                    <option key={tgtCol.name} value={tgtId}>
+                                      {tgtCol.displayName || tgtId} ({tgtId})
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Datastore Mapping */}
+            {userTabConfig.sourceAppId && filteredSourceDatastores.length === 0 && (
+              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 text-sm text-gray-500 text-center mb-4">
+                No datastores attached to the selected source app.
+              </div>
+            )}
+            {filteredSourceDatastores.length > 0 && (
+              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">Datastore Mapping</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left text-gray-700">
+                    <thead className="text-xs text-gray-500 uppercase bg-gray-100">
+                      <tr>
+                        <th className="px-4 py-2">Source Datastore (Old)</th>
+                        <th className="px-4 py-2">Target Datastore (New)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredSourceDatastores.map((srcDs) => {
+                        const srcId = srcDs.name.split('/').pop()!;
+                        return (
+                          <tr key={srcDs.name} className="border-b border-gray-100">
+                            <td className="px-4 py-2 font-mono text-xs">
+                              {srcDs.displayName || srcId} ({srcId})
+                            </td>
+                            <td className="px-4 py-2">
+                              <select
+                                value={datastoreMapping[srcId] || ''}
+                                onChange={(e) => setDatastoreMapping(prev => ({ ...prev, [srcId]: e.target.value }))}
+                                className="bg-white border border-gray-300 rounded-lg p-1 text-xs w-full focus:ring-blue-500 focus:border-blue-500"
+                              >
+                                <option value="">Select Target Datastore...</option>
+                                {filteredTargetDatastores.map((tgtDs) => {
+                                  const tgtId = tgtDs.name.split('/').pop()!;
+                                  return (
+                                    <option key={tgtDs.name} value={tgtId}>
+                                      {tgtDs.displayName || tgtId} ({tgtId})
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
         {/* Logs Section */}
         {(isLoading || logs.length > 0) && (

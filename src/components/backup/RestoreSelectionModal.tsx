@@ -36,6 +36,7 @@ interface RestoreSelectionModalProps {
   showIdInput?: boolean;
   subtitle?: string;
   actionLabel?: string;
+  connectorStatus?: Record<string, 'green' | 'red' | 'grey'>;
 }
 
 const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
@@ -48,6 +49,7 @@ const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
   isLoading,
   showIdInput = false,
   subtitle,
+  connectorStatus,
 }) => {
   const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set());
   const [customIds, setCustomIds] = useState<Record<string, string>>({});
@@ -104,6 +106,34 @@ const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
         </header>
 
         <div className="p-6 flex-1 overflow-y-auto bg-gray-50">
+          <div className="bg-yellow-50 text-yellow-700 p-3 rounded-lg text-xs mb-4 flex items-center gap-2 border border-yellow-200">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+            </svg>
+            <span><strong>Important:</strong> If you are restoring agents with federated connectors, ensure they are authenticated in the new environment *before* restoring.</span>
+          </div>
+          {connectorStatus && Object.keys(connectorStatus).length > 0 && (
+            <div className="mb-4 bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+              <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                <span className="text-blue-500">🔌</span> Required Connectors Status
+              </h3>
+              <ul className="space-y-1 text-xs">
+                {Object.entries(connectorStatus).map(([colId, status]) => (
+                  <li key={colId} className="flex items-center justify-between py-1 border-b border-gray-50 last:border-0">
+                    <span className="font-mono text-gray-600">{colId}</span>
+                    <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full uppercase tracking-wider ${
+                      status === 'green' ? 'bg-green-100 text-green-700 border border-green-200' :
+                      status === 'red' ? 'bg-red-100 text-red-700 border border-red-200' :
+                      'bg-gray-100 text-gray-500 border border-gray-200'
+                    }`}>
+                      {status === 'green' ? 'Authenticated' : status === 'red' ? 'Failed / Action Required' : 'Not Found'}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div className="flex justify-between items-center mb-4">
             <div className="text-sm text-gray-700 font-medium">
               {selectedNames.size} of {items.length} selected
