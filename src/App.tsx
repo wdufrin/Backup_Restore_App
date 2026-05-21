@@ -29,7 +29,10 @@ function App() {
     }
   }, [darkMode]);
   const [projectNumber, setProjectNumber] = useState<string>('');
-  const [userProfile, setUserProfile] = useState<{ name: string, email: string, picture: string } | null>(null);
+  const [userProfile, setUserProfile] = useState<{ name: string, email: string, picture: string } | null>(() => {
+    const saved = sessionStorage.getItem('agentspace-userProfile');
+    return saved ? JSON.parse(saved) : null;
+  });
   const [isGapiReady, setIsGapiReady] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [wifConfig, setWifConfig] = useState(() => {
@@ -84,11 +87,13 @@ function App() {
               })
               .then(res => res.json())
               .then(data => {
-                setUserProfile({
+                const profile = {
                   name: data.name,
                   email: data.email,
                   picture: data.picture
-                });
+                };
+                setUserProfile(profile);
+                sessionStorage.setItem('agentspace-userProfile', JSON.stringify(profile));
               })
               .catch(e => console.error("Failed to fetch user profile", e));
             }
@@ -128,11 +133,13 @@ function App() {
       
       handleSetAccessToken(stsResponse.access_token);
       
-      setUserProfile({
+      const profile = {
         name: email?.split('@')[0] || 'Entra User',
         email: email || '',
         picture: ''
-      });
+      };
+      setUserProfile(profile);
+      sessionStorage.setItem('agentspace-userProfile', JSON.stringify(profile));
       
     } catch (err: any) {
       console.error("Entra ID Sign-in failed", err);
@@ -144,6 +151,7 @@ function App() {
     setAccessToken('');
     setUserProfile(null);
     sessionStorage.removeItem('agentspace-accessToken');
+    sessionStorage.removeItem('agentspace-userProfile');
   };
 
   return (
