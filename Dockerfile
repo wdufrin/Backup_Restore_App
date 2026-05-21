@@ -13,4 +13,4 @@ RUN npm install -g sirv-cli
 COPY --from=builder /app/dist ./dist
 EXPOSE 8080
 # Cloud Run sets the PORT environment variable
-CMD ["sh", "-c", "sirv dist --port ${PORT:-8080} --single"]
+CMD ["sh", "-c", "sirv dist --port ${PORT:-8080} --host 0.0.0.0 --single"]
