@@ -2259,9 +2259,9 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
       </div>
 
       {activeTab === 'user' && (
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 relative">
-          <h2 className="text-lg font-bold text-gray-900 mb-4">My Backups</h2>
-          <p className="text-sm text-gray-500 mb-4">Manage backups and restores for your personal agents and notebooks.</p>
+        <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700 relative">
+          <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-4">My Backups</h2>
+          <p className="text-sm text-gray-500 dark:text-slate-400 mb-4">Manage backups and restores for your personal agents and notebooks.</p>
           
           <div className={`mb-6 p-4 rounded-lg border ${userIdStatus.status === 'pass' ? 'bg-green-50 border-green-200' : userIdStatus.status === 'fail' ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}`}>
             <div className="flex items-center justify-between">
@@ -2306,16 +2306,16 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
               onChange={(e) => setIsDebugMode(e.target.checked)}
               className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
             />
-            <label htmlFor="debugMode" className="text-sm text-gray-700 font-medium cursor-pointer">
+            <label htmlFor="debugMode" className="text-sm text-gray-700 dark:text-white font-medium cursor-pointer">
               Enable Verbose Debug Logging
             </label>
           </div>
 
           {/* Step 1: Connector Authentication */}
-          <div className="mb-6 p-4 rounded-lg border border-gray-200 bg-gray-50">
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">Step 1: Authenticate Connectors</h3>
+          <div className="mb-6 p-4 rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700">
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-2">Step 1: Authenticate Connectors</h3>
             <div className="mb-3">
-              <p className="text-xs text-gray-600 mb-3">
+              <p className="text-xs text-gray-600 dark:text-slate-300 mb-3">
                 Log into the target Gemini Enterprise app and ensure all required federated connectors (SharePoint, OneDrive, Outlook, etc.) are authenticated.
               </p>
               {userTabConfig.targetProject && (
@@ -2340,15 +2340,15 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
                 onChange={(e) => setIsStep1Complete(e.target.checked)}
                 className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
               />
-              <label htmlFor="step1Auth" className="text-sm text-gray-700 font-medium cursor-pointer">
+              <label htmlFor="step1Auth" className="text-sm text-gray-700 dark:text-white font-medium cursor-pointer">
                 I have authenticated all required connectors in the target environment.
               </label>
             </div>
           </div>
 
           {/* Step 2: Backup & Restore */}
-          <div className={`mb-6 p-4 rounded-lg border ${isStep1Complete ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50 opacity-50'}`}>
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">Step 2: Backup or Restore</h3>
+          <div className={`mb-6 p-4 rounded-lg border ${isStep1Complete ? 'border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700' : 'border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 opacity-50'}`}>
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-2">Step 2: Backup or Restore</h3>
             
             <div className="flex flex-col items-center justify-center py-4 space-y-6">
               <div className="w-full max-w-md mb-4">
@@ -2368,7 +2368,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
                       reader.readAsText(file);
                     }
                   }}
-                  className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 disabled:file:bg-gray-100 disabled:file:text-gray-400"
+                  className="block w-full text-sm text-gray-500 dark:text-white file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 disabled:file:bg-gray-100 disabled:file:text-gray-400"
                 />
               </div>
 
@@ -2396,15 +2396,15 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
                 </button>
               </div>
               
-              <div className="text-xs text-gray-500 text-center max-w-md">
+              <div className="text-xs text-gray-500 dark:text-white text-center max-w-md">
                 This will backup or restore all agents and notebooks owned by you in the current target project and location.
               </div>
             </div>
           </div>
 
           {/* Step 3: Finalization */}
-          <div className={`mb-6 p-4 rounded-lg border ${isRestoreComplete ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50 opacity-50'}`}>
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">Step 3: Complete Setup</h3>
+          <div className={`mb-6 p-4 rounded-lg border ${isRestoreComplete ? 'border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700' : 'border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 opacity-50'}`}>
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-2">Step 3: Complete Setup</h3>
             
             {!isRestoreComplete ? (
               <p className="text-xs text-gray-600">
@@ -2412,14 +2412,14 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
               </p>
             ) : (
               <div className="space-y-4">
-                <p className="text-xs text-gray-600 mb-3">
+                <p className="text-xs text-gray-600 dark:text-white mb-3">
                   Please complete the following manual steps to finalize your restoration.
                 </p>
                 
                 <div className="space-y-4">
                   {manualActionReport.map((item, idx) => (
-                    <div key={idx} className="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm space-y-3">
-                      <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                    <div key={idx} className="bg-gray-50 dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm space-y-3">
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                         {item.agentName ? (
                           <><span className="text-blue-500">🤖</span> {item.agentName}</>
                         ) : (
@@ -2508,8 +2508,8 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
                         </>
                       ) : (
                         <>
-                          <div className="text-xs text-gray-600">
-                            <p className="font-medium text-blue-700 bg-blue-50 p-2 rounded-lg border border-blue-100">
+                          <div className="text-xs text-gray-600 dark:text-white">
+                            <p className="font-medium text-blue-700 dark:text-white bg-blue-50 dark:bg-blue-900 p-2 rounded-lg border border-blue-100 dark:border-blue-800">
                               ℹ️ Notebook restored. Please check sources and sharing.
                             </p>
                           </div>
@@ -2529,10 +2529,10 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
                             </div>
                           ) : (
                             <div>
-                              <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                              <h4 className="text-xs font-semibold text-gray-700 dark:text-white mb-1 flex items-center gap-1">
                                 <span className="text-purple-500">👥</span> Sharing:
                               </h4>
-                              <p className="text-xs text-gray-600">
+                              <p className="text-xs text-gray-600 dark:text-white">
                                 We are unable to retrieve shared users from source. Please manually document and reshare your notebooks if needed.
                               </p>
                             </div>
@@ -2540,15 +2540,15 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
 
                           {item.localFiles && item.localFiles.length > 0 ? (
                             <div>
-                              <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                              <h4 className="text-xs font-semibold text-gray-700 dark:text-white mb-1 flex items-center gap-1">
                                 <span className="text-yellow-500">📁</span> Local Files (Action Required):
                               </h4>
-                              <p className="text-xs text-gray-600 mb-1">
+                              <p className="text-xs text-gray-600 dark:text-white mb-1">
                                 The following local files were attached to the original notebook and need to be re-added manually:
                               </p>
-                              <ul className="space-y-1 text-xs text-gray-600">
+                              <ul className="space-y-1 text-xs text-gray-600 dark:text-white">
                                 {item.localFiles.map((file, fIdx) => (
-                                  <li key={fIdx} className="text-gray-700 bg-yellow-50 px-1.5 py-0.5 rounded border border-yellow-100 inline-block mr-1 mb-1">
+                                  <li key={fIdx} className="text-gray-700 dark:text-white bg-yellow-50 dark:bg-slate-900 px-1.5 py-0.5 rounded border border-yellow-100 dark:border-slate-700 inline-block mr-1 mb-1">
                                     {file}
                                   </li>
                                 ))}
@@ -2589,9 +2589,9 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
       )}
 
       {activeTab === 'admin' && (
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 relative">
-          <h2 className="text-lg font-bold text-gray-900 mb-4">Admin Configuration</h2>
-          <p className="text-sm text-gray-500 mb-4">Configure source and target environments and map datastores.</p>
+        <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700 relative">
+          <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Admin Configuration</h2>
+          <p className="text-sm text-gray-500 dark:text-slate-400 mb-4">Configure source and target environments and map datastores.</p>
           
           <div className="flex justify-end gap-2 mb-4">
             <button
@@ -2613,13 +2613,13 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
           </div>
           <div className="space-y-6">
             {/* Source Config */}
-            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">Source Environment</h3>
+            <div className="bg-gray-50 dark:bg-slate-700 p-4 rounded-lg border border-gray-200 dark:border-slate-600">
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-3">Source Environment</h3>
               <div className="grid grid-cols-4 gap-4 items-end">
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">Project ID</label>
+                  <label className="block text-xs text-gray-500 dark:text-white mb-1">Project ID</label>
                   <div className="flex gap-1">
-                    <input type="text" value={userTabConfig.sourceProject} onChange={(e) => setUserTabConfig(prev => ({ ...prev, sourceProject: e.target.value }))} className="bg-white border border-gray-300 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500" />
+                    <input type="text" value={userTabConfig.sourceProject} onChange={(e) => setUserTabConfig(prev => ({ ...prev, sourceProject: e.target.value }))} className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" />
                     <button 
                       onClick={async () => {
                         setIsLoadingSourceApps(true);
@@ -2635,20 +2635,33 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">Location</label>
-                  <select value={userTabConfig.sourceLocation} onChange={(e) => setUserTabConfig(prev => ({ ...prev, sourceLocation: e.target.value }))} className="bg-white border border-gray-300 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500">
+                  <label className="block text-xs text-gray-500 dark:text-white mb-1">Location</label>
+                  <select 
+                    value={userTabConfig.sourceLocation} 
+                    onChange={async (e) => {
+                      const newLocation = e.target.value;
+                      setUserTabConfig(prev => ({ ...prev, sourceLocation: newLocation }));
+                      if (userTabConfig.sourceProject) {
+                        setIsLoadingSourceApps(true);
+                        const apps = await fetchAppsForProject(userTabConfig.sourceProject, newLocation);
+                        setSourceApps(apps);
+                        setIsLoadingSourceApps(false);
+                      }
+                    }}
+                    className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white"
+                  >
                     <option value="global">global</option>
                     <option value="eu">eu</option>
                     <option value="us">us</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">App ID</label>
+                  <label className="block text-xs text-gray-500 dark:text-white mb-1">App ID</label>
                   {sourceApps.length > 0 ? (
                     <select 
                       value={userTabConfig.sourceAppId} 
                       onChange={(e) => setUserTabConfig(prev => ({ ...prev, sourceAppId: e.target.value }))} 
-                      className="bg-white border border-gray-300 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500"
+                      className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white"
                     >
                       <option value="">Select App ...</option>
                       {sourceApps.map(app => <option key={app.name} value={app.name.split('/').pop()}>{app.displayName || app.name.split('/').pop()}</option>)}
@@ -2674,20 +2687,20 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
                 </div>
               </div>
               {sourceDatastores.length > 0 && (
-                <div className="mt-3 text-xs text-gray-600">
+                <div className="mt-3 text-xs text-gray-600 dark:text-white">
                   Found {sourceDatastores.length} datastores in source.
                 </div>
               )}
             </div>
 
             {/* Target Config */}
-            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">Target Environment</h3>
+            <div className="bg-gray-50 dark:bg-slate-700 p-4 rounded-lg border border-gray-200 dark:border-slate-600">
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-3">Target Environment</h3>
               <div className="grid grid-cols-4 gap-4 items-end">
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">Project ID</label>
+                  <label className="block text-xs text-gray-500 dark:text-white mb-1">Project ID</label>
                   <div className="flex gap-1">
-                    <input type="text" value={userTabConfig.targetProject} onChange={(e) => setUserTabConfig(prev => ({ ...prev, targetProject: e.target.value }))} className="bg-white border border-gray-300 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500" />
+                    <input type="text" value={userTabConfig.targetProject} onChange={(e) => setUserTabConfig(prev => ({ ...prev, targetProject: e.target.value }))} className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" />
                     <button 
                       onClick={async () => {
                         setIsLoadingTargetApps(true);
@@ -2703,20 +2716,33 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">Location</label>
-                  <select value={userTabConfig.targetLocation} onChange={(e) => setUserTabConfig(prev => ({ ...prev, targetLocation: e.target.value }))} className="bg-white border border-gray-300 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500">
+                  <label className="block text-xs text-gray-500 dark:text-white mb-1">Location</label>
+                  <select 
+                    value={userTabConfig.targetLocation} 
+                    onChange={async (e) => {
+                      const newLocation = e.target.value;
+                      setUserTabConfig(prev => ({ ...prev, targetLocation: newLocation }));
+                      if (userTabConfig.targetProject) {
+                        setIsLoadingTargetApps(true);
+                        const apps = await fetchAppsForProject(userTabConfig.targetProject, newLocation);
+                        setTargetApps(apps);
+                        setIsLoadingTargetApps(false);
+                      }
+                    }}
+                    className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white"
+                  >
                     <option value="global">global</option>
                     <option value="eu">eu</option>
                     <option value="us">us</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">App ID</label>
+                  <label className="block text-xs text-gray-500 dark:text-white mb-1">App ID</label>
                   {targetApps.length > 0 ? (
                     <select 
                       value={userTabConfig.targetAppId} 
                       onChange={(e) => setUserTabConfig(prev => ({ ...prev, targetAppId: e.target.value }))} 
-                      className="bg-white border border-gray-300 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500"
+                      className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white"
                     >
                       <option value="">Select App ...</option>
                       {targetApps.map(app => <option key={app.name} value={app.name.split('/').pop()}>{app.displayName || app.name.split('/').pop()}</option>)}
@@ -2742,7 +2768,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
                 </div>
               </div>
               <div className="mt-3">
-                <label className="block text-xs text-gray-500 mb-1">Target GE App URL (Optional - for direct link in Step 1)</label>
+                <label className="block text-xs text-gray-500 dark:text-white mb-1">Target GE App URL (Optional - for direct link in Step 1)</label>
                 <input 
                   type="text" 
                   value={userTabConfig.targetAppUrl} 
@@ -2752,7 +2778,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
                 />
               </div>
               {targetDatastores.length > 0 && (
-                <div className="mt-3 text-xs text-gray-600">
+                <div className="mt-3 text-xs text-gray-600 dark:text-white">
                   Found {targetDatastores.length} datastores in target.
                 </div>
               )}
@@ -2760,11 +2786,11 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
 
             {/* Collection Mapping */}
             {filteredSourceCollections.length > 0 && (
-              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-6">
-                <h3 className="text-sm font-semibold text-gray-700 mb-3">Collection Mapping (for Connectors)</h3>
+              <div className="bg-gray-50 dark:bg-slate-700 p-4 rounded-lg border border-gray-200 dark:border-slate-600 mb-6">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-3">Collection Mapping (for Connectors)</h3>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm text-left text-gray-700">
-                    <thead className="text-xs text-gray-500 uppercase bg-gray-100">
+                  <table className="w-full text-sm text-left text-gray-700 dark:text-slate-300">
+                    <thead className="text-xs text-gray-500 dark:text-slate-400 uppercase bg-gray-100 dark:bg-slate-800">
                       <tr>
                         <th className="px-4 py-2">Source Collection</th>
                         <th className="px-4 py-2">Target Collection</th>
@@ -2774,15 +2800,15 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
                       {filteredSourceCollections.map((srcCol) => {
                         const srcId = srcCol.name.split('/').pop()!;
                         return (
-                          <tr key={srcCol.name} className="border-b border-gray-100">
-                            <td className="px-4 py-2 font-mono text-xs">
+                          <tr key={srcCol.name} className="border-b border-gray-100 dark:border-slate-600">
+                            <td className="px-4 py-2 font-mono text-xs dark:text-slate-200">
                               {srcCol.displayName || srcId} ({srcId})
                             </td>
                             <td className="px-4 py-2">
                               <select
                                 value={collectionMapping[srcId] || ''}
                                 onChange={(e) => setCollectionMapping(prev => ({ ...prev, [srcId]: e.target.value }))}
-                                className="bg-white border border-gray-300 rounded-lg p-1 text-xs w-full focus:ring-blue-500 focus:border-blue-500"
+                                className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-1 text-xs w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white"
                               >
                                 <option value="">Select Target Collection...</option>
                                 {targetCollections.map((tgtCol) => {
@@ -2806,16 +2832,16 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
 
             {/* Datastore Mapping */}
             {userTabConfig.sourceAppId && filteredSourceDatastores.length === 0 && (
-              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 text-sm text-gray-500 text-center mb-4">
+              <div className="bg-gray-50 dark:bg-slate-700 p-4 rounded-lg border border-gray-200 dark:border-slate-600 text-sm text-gray-500 dark:text-slate-400 text-center mb-4">
                 No datastores attached to the selected source app.
               </div>
             )}
             {filteredSourceDatastores.length > 0 && (
-              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                <h3 className="text-sm font-semibold text-gray-700 mb-3">Datastore Mapping</h3>
+              <div className="bg-gray-50 dark:bg-slate-700 p-4 rounded-lg border border-gray-200 dark:border-slate-600">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-3">Datastore Mapping</h3>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm text-left text-gray-700">
-                    <thead className="text-xs text-gray-500 uppercase bg-gray-100">
+                  <table className="w-full text-sm text-left text-gray-700 dark:text-slate-300">
+                    <thead className="text-xs text-gray-500 dark:text-slate-400 uppercase bg-gray-100 dark:bg-slate-800">
                       <tr>
                         <th className="px-4 py-2">Source Datastore (Old)</th>
                         <th className="px-4 py-2">Target Datastore (New)</th>
@@ -2825,15 +2851,15 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
                       {filteredSourceDatastores.map((srcDs) => {
                         const srcId = srcDs.name.split('/').pop()!;
                         return (
-                          <tr key={srcDs.name} className="border-b border-gray-100">
-                            <td className="px-4 py-2 font-mono text-xs">
+                          <tr key={srcDs.name} className="border-b border-gray-100 dark:border-slate-600">
+                            <td className="px-4 py-2 font-mono text-xs dark:text-slate-200">
                               {srcDs.displayName || srcId} ({srcId})
                             </td>
                             <td className="px-4 py-2">
                               <select
                                 value={datastoreMapping[srcId] || ''}
                                 onChange={(e) => setDatastoreMapping(prev => ({ ...prev, [srcId]: e.target.value }))}
-                                className="bg-white border border-gray-300 rounded-lg p-1 text-xs w-full focus:ring-blue-500 focus:border-blue-500"
+                                className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-1 text-xs w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white"
                               >
                                 <option value="">Select Target Datastore...</option>
                                 {filteredTargetDatastores.map((tgtDs) => {
@@ -2860,13 +2886,13 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
 
         {/* Logs Section */}
         {(isLoading || logs.length > 0) && (
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mt-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center">
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700 mt-6">
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center">
               {isLoading && <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-blue-600 mr-3"></div>}
               {isLoading ? `Running: ${loadingSection?.replace(/[A-Z]/g, ' $&').trim()}` : 'Operation Logs'}
             </h2>
             {error && <div className="text-sm text-red-600 p-3 mb-3 bg-red-50 border border-red-200 rounded-lg">{error}</div>}
-            <pre className="bg-gray-50 text-xs text-gray-700 p-4 rounded-lg h-64 overflow-y-auto font-mono border border-gray-200">
+            <pre className="bg-gray-50 dark:bg-slate-900 text-xs text-gray-700 dark:text-slate-300 p-4 rounded-lg h-64 overflow-y-auto font-mono border border-gray-200 dark:border-slate-700">
               {logs.join('\n')}
             </pre>
           </div>

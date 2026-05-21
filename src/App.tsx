@@ -14,6 +14,20 @@ declare global {
 
 function App() {
   const [accessToken, setAccessToken] = useState<string>(() => sessionStorage.getItem('agentspace-accessToken') || '');
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    const saved = localStorage.getItem('theme');
+    return saved === 'dark';
+  });
+
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    }
+  }, [darkMode]);
   const [projectNumber, setProjectNumber] = useState<string>('');
   const [userProfile, setUserProfile] = useState<{ name: string, email: string, picture: string } | null>(null);
   const [isGapiReady, setIsGapiReady] = useState(false);
@@ -133,17 +147,32 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 flex flex-col font-sans">
-      <header className="bg-white border-b border-gray-200 p-4 flex justify-between items-center h-14 flex-shrink-0 shadow-sm">
+    <div className="min-h-screen bg-gray-50 dark:bg-slate-900 text-gray-900 dark:text-slate-200 flex flex-col font-sans">
+      <header className="bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 p-4 flex justify-between items-center h-14 flex-shrink-0 shadow-sm">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center text-white font-bold text-xl">A</div>
-            <span className="text-lg font-semibold text-gray-900">Gemini Enterprise</span>
+            <span className="text-lg font-semibold text-gray-900 dark:text-white">Gemini Enterprise</span>
             <span className="text-gray-400">|</span>
-            <span className="text-lg text-gray-600">Backup & Recovery</span>
+            <span className="text-lg text-gray-600 dark:text-gray-400">Backup & Recovery</span>
           </div>
         </div>
         <div className="flex items-center gap-6 flex-shrink-0">
+          <button 
+            onClick={() => setDarkMode(!darkMode)} 
+            className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors" 
+            title={darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+          >
+            {darkMode ? (
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 9H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m12.728 0l-.707-.707M6.343 6.343l-.707-.707M12 5a7 7 0 100 14 7 7 0 000-14z" />
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+              </svg>
+            )}
+          </button>
           <button className="text-gray-500 hover:text-gray-700 transition-colors">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -169,15 +198,7 @@ function App() {
         </div>
       </header>
 
-      <div className="bg-white border-b border-gray-200 px-6 py-2 flex items-center text-sm text-gray-700">
-        <span className="font-medium mr-1">Active Project:</span>
-        <div className="relative flex items-center cursor-pointer hover:text-gray-900" onClick={() => setIsSettingsOpen(true)}>
-          <span>{projectNumber || ''}</span>
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </div>
-      </div>
+
 
       <div className="flex flex-1 overflow-hidden">
         <main className="flex-1 p-6 overflow-y-auto">
@@ -213,9 +234,9 @@ function App() {
       </div>
       {isWifModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-lg max-w-md w-full flex flex-col border border-gray-200 p-6">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg max-w-md w-full flex flex-col border border-gray-200 dark:border-slate-700 p-6">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-bold text-gray-900">WIF Configuration</h2>
+              <h2 className="text-lg font-bold text-gray-900 dark:text-white">WIF Configuration</h2>
               <button onClick={() => setIsWifModalOpen(false)} className="text-gray-400 hover:text-gray-600">
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -224,28 +245,28 @@ function App() {
             </div>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">User Project</label>
-                <input type="text" value={wifConfig.userProject} onChange={(e) => setWifConfig({...wifConfig, userProject: e.target.value})} className="w-full border border-gray-300 rounded-md p-2 text-sm" />
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">User Project</label>
+                <input type="text" value={wifConfig.userProject} onChange={(e) => setWifConfig({...wifConfig, userProject: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Pool ID</label>
-                <input type="text" value={wifConfig.poolId} onChange={(e) => setWifConfig({...wifConfig, poolId: e.target.value})} className="w-full border border-gray-300 rounded-md p-2 text-sm" />
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Pool ID</label>
+                <input type="text" value={wifConfig.poolId} onChange={(e) => setWifConfig({...wifConfig, poolId: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Provider ID</label>
-                <input type="text" value={wifConfig.providerId} onChange={(e) => setWifConfig({...wifConfig, providerId: e.target.value})} className="w-full border border-gray-300 rounded-md p-2 text-sm" />
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Provider ID</label>
+                <input type="text" value={wifConfig.providerId} onChange={(e) => setWifConfig({...wifConfig, providerId: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Client ID</label>
-                <input type="text" value={wifConfig.clientId} onChange={(e) => setWifConfig({...wifConfig, clientId: e.target.value})} className="w-full border border-gray-300 rounded-md p-2 text-sm" />
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Client ID</label>
+                <input type="text" value={wifConfig.clientId} onChange={(e) => setWifConfig({...wifConfig, clientId: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Auth Endpoint</label>
-                <input type="text" value={wifConfig.authEndpoint} onChange={(e) => setWifConfig({...wifConfig, authEndpoint: e.target.value})} className="w-full border border-gray-300 rounded-md p-2 text-sm" />
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Auth Endpoint</label>
+                <input type="text" value={wifConfig.authEndpoint} onChange={(e) => setWifConfig({...wifConfig, authEndpoint: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Redirect URI</label>
-                <input type="text" value={wifConfig.redirectUri} onChange={(e) => setWifConfig({...wifConfig, redirectUri: e.target.value})} className="w-full border border-gray-300 rounded-md p-2 text-sm" />
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Redirect URI</label>
+                <input type="text" value={wifConfig.redirectUri} onChange={(e) => setWifConfig({...wifConfig, redirectUri: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
               </div>
             </div>
             <div className="flex justify-end mt-6">
