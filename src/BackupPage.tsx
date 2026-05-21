@@ -39,6 +39,22 @@ interface BackupPageProps {
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+const isRestorableSource = (source: any): boolean => {
+  // Skip if it's identified as a local file or unsupported source
+  if (source.metadata?.agentspaceMetadata) {
+    return false;
+  }
+  
+  // Keep if it's a supported link
+  return !!(
+    source.metadata?.googleDocsMetadata ||
+    source.metadata?.youtubeMetadata ||
+    source.metadata?.webpageMetadata ||
+    source.url ||
+    source.webScrapeConfig
+  );
+};
+
 const mapSourceToPayload = (source: any) => {
   const sourcePayload: any = {};
   const sourceName = source.title || source.displayName || 'Restored Source';
@@ -1214,9 +1230,13 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
               addLog(`  - Created Notebook: ${newNotebookId}`);
 
               if (nb.sources && nb.sources.length > 0) {
-                const sourceRequests = nb.sources.map(mapSourceToPayload);
-                await api.batchCreateNotebookSources(targetConfig, newNotebookId, sourceRequests);
-                addLog(`    - Restored ${sourceRequests.length} sources.`);
+                const sourceRequests = nb.sources.filter(isRestorableSource).map(mapSourceToPayload);
+                if (sourceRequests.length > 0) {
+                  await api.batchCreateNotebookSources(targetConfig, newNotebookId, sourceRequests);
+                  addLog(`    - Restored ${sourceRequests.length} sources.`);
+                } else {
+                  addLog(`    - No restorable sources found (skipping local files).`);
+                }
               }
             } catch (nbErr: any) {
               addLog(`  - Error restoring notebook ${nb.name}: ${nbErr.message}`);
@@ -1395,7 +1415,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
             content += `    * ${email}\n`;
           });
         } else {
-          content += `- Sharing: Please re-share this notebook with the appropriate users manually.\n`;
+          content += `- Sharing: We are unable to retrieve shared users from source. Please manually document and reshare your notebooks if needed.\n`;
         }
 
         if (item.localFiles && item.localFiles.length > 0) {
@@ -1901,14 +1921,18 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
 
             // Restore sources
             if (notebook.sources && notebook.sources.length > 0) {
-              addLog(`    - Restoring ${notebook.sources.length} sources for notebook '${newNotebookId}'...`);
-              const sourceRequests = notebook.sources.map(mapSourceToPayload);
-
-              try {
-                await api.batchCreateNotebookSources(apiConfig, newNotebookId, sourceRequests);
-                addLog(`      - SUCCESS: Batch created ${sourceRequests.length} sources.`);
-              } catch (srcErr: any) {
-                addLog(`      - ERROR: Failed to batch create sources for notebook '${newNotebookId}': ${srcErr.message}`);
+              const sourceRequests = notebook.sources.filter(isRestorableSource).map(mapSourceToPayload);
+              
+              if (sourceRequests.length > 0) {
+                addLog(`    - Restoring ${sourceRequests.length} supported sources for notebook '${newNotebookId}'...`);
+                try {
+                  await api.batchCreateNotebookSources(apiConfig, newNotebookId, sourceRequests);
+                  addLog(`      - SUCCESS: Batch created ${sourceRequests.length} sources.`);
+                } catch (srcErr: any) {
+                  addLog(`      - ERROR: Failed to batch create sources for notebook '${newNotebookId}': ${srcErr.message}`);
+                }
+              } else {
+                addLog(`    - No restorable sources found for notebook '${newNotebookId}' (skipping local files).`);
               }
             }
           } catch (err: any) {
@@ -2509,7 +2533,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
                                 <span className="text-purple-500">👥</span> Sharing:
                               </h4>
                               <p className="text-xs text-gray-600">
-                                Please re-share this notebook with the appropriate users manually.
+                                We are unable to retrieve shared users from source. Please manually document and reshare your notebooks if needed.
                               </p>
                             </div>
                           )}
