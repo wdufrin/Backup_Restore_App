@@ -4,7 +4,7 @@ import { initGapiClient } from './services/gapiService';
 import * as api from './services/apiService';
 import './App.css';
 
-const GOOGLE_CLIENT_ID = '180054373655-2b600fnjissdmll4ipj2ndhr0i2h03fj.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = '[YOUR_GOOGLE_CLIENT_ID].apps.googleusercontent.com';
 
 declare global {
     interface Window {
@@ -20,14 +20,20 @@ function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [wifConfig, setWifConfig] = useState(() => {
     const saved = localStorage.getItem('agentspace-wifConfig');
-    return saved ? JSON.parse(saved) : {
-      userProject: '[YOUR_PROJECT_ID]',
-      poolId: '[YOUR_POOL_ID]',
-      providerId: '[YOUR_PROVIDER_ID]',
-      clientId: '[YOUR_CLIENT_ID]',
-      authEndpoint: 'https://login.microsoftonline.com/[YOUR_TENANT_ID]/oauth2/v2.0/authorize',
-      redirectUri: 'http://localhost:5173',
-    };
+    const parsed = saved ? JSON.parse(saved) : null;
+    
+    // Fallback to placeholders if no saved config or if it contains specific old values
+    if (!parsed || parsed.userProject === 'ancient-sandbox-322523' || parsed.poolId === 'wdufrin-entra') {
+      return {
+        userProject: '[YOUR_PROJECT_ID]',
+        poolId: '[YOUR_POOL_ID]',
+        providerId: '[YOUR_PROVIDER_ID]',
+        clientId: '[YOUR_CLIENT_ID]',
+        authEndpoint: 'https://login.microsoftonline.com/[YOUR_TENANT_ID]/oauth2/v2.0/authorize',
+        redirectUri: 'http://localhost:5173',
+      };
+    }
+    return parsed;
   });
   const [isWifModalOpen, setIsWifModalOpen] = useState(false);
   const tokenClient = useRef<any>(null);
@@ -182,8 +188,8 @@ function App() {
                 {userProfile?.name?.[0] || 'W'}
               </div>
               <div className="flex flex-col text-left">
-                <span className="text-sm font-semibold text-gray-900">{userProfile?.name || 'William Dufrin'}</span>
-                <span className="text-xs text-gray-500">{userProfile?.email || 'admin@wdufrin.altostrat.com'}</span>
+                <span className="text-sm font-semibold text-gray-900">{userProfile?.name || '[YOUR_NAME]'}</span>
+                <span className="text-xs text-gray-500">{userProfile?.email || '[YOUR_EMAIL]'}</span>
               </div>
               <button onClick={handleSignOut} className="ml-2 text-xs text-red-400 hover:text-red-300 font-medium">Sign Out</button>
             </div>
