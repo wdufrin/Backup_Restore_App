@@ -4,7 +4,7 @@ import { initGapiClient } from './services/gapiService';
 import * as api from './services/apiService';
 import './App.css';
 
-const GOOGLE_CLIENT_ID = '[YOUR_GOOGLE_CLIENT_ID].apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '[YOUR_GOOGLE_CLIENT_ID].apps.googleusercontent.com';
 
 declare global {
     interface Window {
