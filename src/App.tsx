@@ -21,11 +21,11 @@ function App() {
   const [wifConfig, setWifConfig] = useState(() => {
     const saved = localStorage.getItem('agentspace-wifConfig');
     return saved ? JSON.parse(saved) : {
-      userProject: 'ancient-sandbox-322523',
-      poolId: 'wdufrin-entra',
-      providerId: 'adk-entra',
-      clientId: 'b56052a7-6ac1-4b35-b511-d5e0be2afd2a',
-      authEndpoint: 'https://login.microsoftonline.com/5ae87d26-ea67-46a2-9e69-845111b8ad75/oauth2/v2.0/authorize',
+      userProject: '[YOUR_PROJECT_ID]',
+      poolId: '[YOUR_POOL_ID]',
+      providerId: '[YOUR_PROVIDER_ID]',
+      clientId: '[YOUR_CLIENT_ID]',
+      authEndpoint: 'https://login.microsoftonline.com/[YOUR_TENANT_ID]/oauth2/v2.0/authorize',
       redirectUri: 'http://localhost:5173',
     };
   });
@@ -130,6 +130,33 @@ function App() {
     setAccessToken('');
     setUserProfile(null);
     sessionStorage.removeItem('agentspace-accessToken');
+  };
+
+  const handleExportWifConfig = () => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(wifConfig, null, 2));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href",     dataStr);
+    downloadAnchorNode.setAttribute("download", "wif_config.json");
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+  };
+
+  const handleImportWifConfig = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const json = JSON.parse(event.target?.result as string);
+        setWifConfig(json);
+        localStorage.setItem('agentspace-wifConfig', JSON.stringify(json));
+        alert("Config imported successfully!");
+      } catch (err) {
+        alert("Failed to parse JSON file");
+      }
+    };
+    reader.readAsText(file);
   };
 
   return (
@@ -248,7 +275,14 @@ function App() {
                 <input type="text" value={wifConfig.redirectUri} onChange={(e) => setWifConfig({...wifConfig, redirectUri: e.target.value})} className="w-full border border-gray-300 rounded-md p-2 text-sm" />
               </div>
             </div>
-            <div className="flex justify-end mt-6">
+            <div className="flex justify-between mt-6">
+              <div className="flex gap-2">
+                <button onClick={handleExportWifConfig} className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold rounded-lg">Export</button>
+                <label className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold rounded-lg cursor-pointer">
+                  Import
+                  <input type="file" accept=".json" onChange={handleImportWifConfig} className="hidden" />
+                </label>
+              </div>
               <button 
                 onClick={() => {
                   localStorage.setItem('agentspace-wifConfig', JSON.stringify(wifConfig));
