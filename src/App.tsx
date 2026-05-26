@@ -13,6 +13,7 @@ declare global {
 }
 
 function App() {
+  const isAdminModeEnabled = import.meta.env.VITE_ENABLE_ADMIN_MODE === 'true';
   const [accessToken, setAccessToken] = useState<string>(() => sessionStorage.getItem('agentspace-accessToken') || '');
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem('theme');
@@ -38,12 +39,12 @@ function App() {
   const [wifConfig, setWifConfig] = useState(() => {
     const saved = localStorage.getItem('agentspace-wifConfig');
     return saved ? JSON.parse(saved) : {
-      userProject: '',
-      poolId: '',
-      providerId: '',
-      clientId: '',
-      authEndpoint: '',
-      redirectUri: '',
+      userProject: import.meta.env.VITE_WIF_USER_PROJECT || '',
+      poolId: import.meta.env.VITE_WIF_POOL_ID || '',
+      providerId: import.meta.env.VITE_WIF_PROVIDER_ID || '',
+      clientId: import.meta.env.VITE_WIF_CLIENT_ID || '',
+      authEndpoint: import.meta.env.VITE_WIF_AUTH_ENDPOINT || '',
+      redirectUri: import.meta.env.VITE_WIF_REDIRECT_URI || '',
     };
   });
   const [isWifModalOpen, setIsWifModalOpen] = useState(false);
@@ -110,15 +111,15 @@ function App() {
     }
   };
 
-  const handleEntraSignIn = async () => {
+  const handleWifSignIn = async () => {
     try {
       const authorizationEndpoint = wifConfig.authEndpoint;
       const clientId = wifConfig.clientId;
       const redirectUri = wifConfig.redirectUri;
 
-      console.log("Starting Entra ID sign in...");
+      console.log("Starting WiF sign in...");
       const { idToken, email } = await api.signInWithOidcPopup(authorizationEndpoint, clientId, redirectUri);
-      console.log("Received ID Token from Entra ID, exchanging for STS token...");
+      console.log("Received ID Token from WiF, exchanging for STS token...");
 
       const wifConfigForExchange = {
         userProject: wifConfig.userProject,
@@ -134,7 +135,7 @@ function App() {
       handleSetAccessToken(stsResponse.access_token);
       
       const profile = {
-        name: email?.split('@')[0] || 'Entra User',
+        name: email?.split('@')[0] || 'WiF User',
         email: email || '',
         picture: ''
       };
@@ -142,7 +143,7 @@ function App() {
       sessionStorage.setItem('agentspace-userProfile', JSON.stringify(profile));
       
     } catch (err: any) {
-      console.error("Entra ID Sign-in failed", err);
+      console.error("WiF Sign-in failed", err);
       alert(`Sign-in failed: ${err.message}`);
     }
   };
@@ -152,6 +153,37 @@ function App() {
     setUserProfile(null);
     sessionStorage.removeItem('agentspace-accessToken');
     sessionStorage.removeItem('agentspace-userProfile');
+  };
+
+  const exportWifConfig = () => {
+    const jsonStr = JSON.stringify(wifConfig, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `wif_config__${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const importWifConfig = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const json = JSON.parse(e.target?.result as string);
+        setWifConfig(json);
+        localStorage.setItem('agentspace-wifConfig', JSON.stringify(json));
+        alert(`WIF configuration imported successfully from ${file.name}`);
+      } catch (err: any) {
+        alert(`Error importing WIF configuration: ${err.message}`);
+      }
+    };
+    reader.readAsText(file);
   };
 
   return (
@@ -200,7 +232,7 @@ function App() {
           ) : (
             <div className="flex gap-2">
               <button onClick={handleGoogleSignIn} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm">Sign In with Google</button>
-              <button onClick={handleEntraSignIn} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm">Sign In with Entra ID</button>
+              <button onClick={handleWifSignIn} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm">Sign In with WiF</button>
             </div>
           )}
         </div>
@@ -228,13 +260,15 @@ function App() {
               <p className="text-gray-600 mb-4">Please sign in to access backup and restore functions.</p>
               <div className="flex gap-2 items-center">
                 <button onClick={handleGoogleSignIn} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm">Sign In with Google</button>
-                <button onClick={handleEntraSignIn} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm">Sign In with Entra ID</button>
-                <button onClick={() => setIsWifModalOpen(true)} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full shadow-md transition-colors" title="WIF Configuration">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                </button>
+                <button onClick={handleWifSignIn} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm">Sign In with WiF</button>
+                {isAdminModeEnabled && (
+                  <button onClick={() => setIsWifModalOpen(true)} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full shadow-md transition-colors" title="WIF Configuration">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -277,7 +311,19 @@ function App() {
                 <input type="text" value={wifConfig.redirectUri} onChange={(e) => setWifConfig({...wifConfig, redirectUri: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
               </div>
             </div>
-            <div className="flex justify-end mt-6">
+            <div className="flex justify-between mt-6">
+              <div className="flex gap-2">
+                <button 
+                  onClick={exportWifConfig} 
+                  className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs font-semibold rounded-lg"
+                >
+                  Export
+                </button>
+                <label className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs font-semibold rounded-lg cursor-pointer">
+                  Import
+                  <input type="file" accept=".json" onChange={importWifConfig} className="hidden" />
+                </label>
+              </div>
               <button 
                 onClick={() => {
                   localStorage.setItem('agentspace-wifConfig', JSON.stringify(wifConfig));

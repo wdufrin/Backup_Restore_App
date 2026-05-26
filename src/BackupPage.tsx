@@ -112,15 +112,16 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
     collectionId: 'default_collection',
     assistantId: 'default_assistant',
   });
-  const [activeTab, setActiveTab] = useState<'admin' | 'user'>('admin');
+  const isAdminModeEnabled = import.meta.env.VITE_ENABLE_ADMIN_MODE === 'true';
+  const [activeTab, setActiveTab] = useState<'admin' | 'user'>(isAdminModeEnabled ? 'admin' : 'user');
   const [userTabConfig, setUserTabConfig] = useState({
-    sourceProject: '',
-    sourceLocation: 'global',
-    sourceAppId: '',
-    targetProject: '',
-    targetLocation: 'global',
-    targetAppId: '',
-    targetAppUrl: '',
+    sourceProject: import.meta.env.VITE_SOURCE_PROJECT || '',
+    sourceLocation: import.meta.env.VITE_SOURCE_LOCATION || 'global',
+    sourceAppId: import.meta.env.VITE_SOURCE_APP_ID || '',
+    targetProject: import.meta.env.VITE_TARGET_PROJECT || '',
+    targetLocation: import.meta.env.VITE_TARGET_LOCATION || 'global',
+    targetAppId: import.meta.env.VITE_TARGET_APP_ID || '',
+    targetAppUrl: import.meta.env.VITE_TARGET_APP_URL || '',
   });
   const [isUserConfigModalOpen, setIsUserConfigModalOpen] = useState(false);
   const [sourceApps, setSourceApps] = useState<any[]>([]);
@@ -2245,16 +2246,18 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
           >
             User View
           </button>
-          <button
-            onClick={() => setActiveTab('admin')}
-            className={`${
-              activeTab === 'admin'
-                ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm font-semibold transition-colors`}
-          >
-            Admin View
-          </button>
+          {isAdminModeEnabled && (
+            <button
+              onClick={() => setActiveTab('admin')}
+              className={`${
+                activeTab === 'admin'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm font-semibold transition-colors`}
+            >
+              Admin View
+            </button>
+          )}
         </nav>
       </div>
 
@@ -2263,53 +2266,47 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
           <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-4">My Backups</h2>
           <p className="text-sm text-gray-500 dark:text-slate-400 mb-4">Manage backups and restores for your personal agents and notebooks.</p>
           
-          <div className={`mb-6 p-4 rounded-lg border ${userIdStatus.status === 'pass' ? 'bg-green-50 border-green-200' : userIdStatus.status === 'fail' ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}`}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-gray-700">Permission Check:</span>
-                {userIdStatus.status === 'pass' ? (
-                  <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-green-100 text-green-700">PASS</span>
-                ) : userIdStatus.status === 'fail' ? (
-                  <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-red-100 text-red-700">FAIL</span>
-                ) : !userTabConfig.sourceProject ? (
-                  <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-yellow-100 text-yellow-700">ENTER A PROJECT</span>
-                ) : (
-                  <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-gray-100 text-gray-700">PENDING</span>
+          {isAdminModeEnabled && (
+            <div className={`mb-6 p-4 rounded-lg border ${userIdStatus.status === 'pass' ? 'bg-green-50 border-green-200' : userIdStatus.status === 'fail' ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-gray-700">Permission Check:</span>
+                  {userIdStatus.status === 'pass' ? (
+                    <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-green-100 text-green-700">PASS</span>
+                  ) : userIdStatus.status === 'fail' ? (
+                    <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-red-100 text-red-700">FAIL</span>
+                  ) : !userTabConfig.sourceProject ? (
+                    <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-yellow-100 text-yellow-700">ENTER A PROJECT</span>
+                  ) : (
+                    <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-gray-100 text-gray-700">PENDING</span>
+                  )}
+                </div>
+                {userIdStatus.status === 'fail' && (
+                  <button onClick={() => setIsIdCheckExpanded(!isIdCheckExpanded)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">
+                    {isIdCheckExpanded ? 'Hide Details' : 'Show Details'}
+                  </button>
                 )}
               </div>
-              {userIdStatus.status === 'fail' && (
-                <button 
-                  onClick={() => setIsIdCheckExpanded(!isIdCheckExpanded)} 
-                  className="text-xs text-blue-600 hover:text-blue-700 font-medium"
-                >
-                  {isIdCheckExpanded ? 'Hide Details' : 'Show How to Fix'}
-                </button>
-              )}
-            </div>
-            {userIdStatus.status === 'fail' && isIdCheckExpanded && (
-              <div className="mt-3 text-xs text-gray-700 whitespace-pre-wrap break-words bg-white p-4 rounded-lg border border-red-100 font-mono">
-                {userIdStatus.details}
-              </div>
-            )}
-            {userIdStatus.status === 'pass' && (
               <div className="mt-2 text-xs text-gray-600">
                 {userIdStatus.details}
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
-          <div className="flex items-center gap-2 mb-4">
-            <input 
-              type="checkbox" 
-              id="debugMode" 
-              checked={isDebugMode} 
-              onChange={(e) => setIsDebugMode(e.target.checked)}
-              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-            />
-            <label htmlFor="debugMode" className="text-sm text-gray-700 dark:text-white font-medium cursor-pointer">
-              Enable Verbose Debug Logging
-            </label>
-          </div>
+          {isAdminModeEnabled && (
+            <div className="flex items-center gap-2 mb-4">
+              <input 
+                type="checkbox" 
+                id="debugMode" 
+                checked={isDebugMode} 
+                onChange={(e) => setIsDebugMode(e.target.checked)}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <label htmlFor="debugMode" className="text-sm text-gray-700 dark:text-white font-medium cursor-pointer">
+                Enable Verbose Debug Logging
+              </label>
+            </div>
+          )}
 
           {/* Step 1: Connector Authentication */}
           <div className="mb-6 p-4 rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700">
@@ -2674,6 +2671,23 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
                   <button
                     onClick={async () => {
                       setIsLoadingSourceDatastores(true);
+                      
+                      if (userTabConfig.sourceAppId && !sourceApps.some(app => app.name.split('/').pop() === userTabConfig.sourceAppId)) {
+                        try {
+                          addLog(`Fetching details for app ${userTabConfig.sourceAppId}...`);
+                          const app = await api.getEngine(userTabConfig.sourceAppId, { 
+                            ...apiConfig, 
+                            projectId: userTabConfig.sourceProject, 
+                            appLocation: userTabConfig.sourceLocation,
+                            collectionId: 'default_collection'
+                          });
+                          setSourceApps(prev => [...prev, app]);
+                          addLog(`App details fetched.`);
+                        } catch (e: any) {
+                          addLog(`Failed to fetch details for app ${userTabConfig.sourceAppId}: ${e.message}`);
+                        }
+                      }
+
                       const { datastores, collections } = await fetchDataAssets(userTabConfig.sourceProject, userTabConfig.sourceLocation);
                       setSourceDatastores(datastores);
                       setSourceCollections(collections);
@@ -2755,6 +2769,23 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
                   <button
                     onClick={async () => {
                       setIsLoadingTargetDatastores(true);
+                      
+                      if (userTabConfig.targetAppId && !targetApps.some(app => app.name.split('/').pop() === userTabConfig.targetAppId)) {
+                        try {
+                          addLog(`Fetching details for app ${userTabConfig.targetAppId}...`);
+                          const app = await api.getEngine(userTabConfig.targetAppId, { 
+                            ...apiConfig, 
+                            projectId: userTabConfig.targetProject, 
+                            appLocation: userTabConfig.targetLocation,
+                            collectionId: 'default_collection'
+                          });
+                          setTargetApps(prev => [...prev, app]);
+                          addLog(`App details fetched.`);
+                        } catch (e: any) {
+                          addLog(`Failed to fetch details for app ${userTabConfig.targetAppId}: ${e.message}`);
+                        }
+                      }
+
                       const { datastores, collections } = await fetchDataAssets(userTabConfig.targetProject, userTabConfig.targetLocation);
                       setTargetDatastores(datastores);
                       setTargetCollections(collections);
@@ -2885,7 +2916,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
       )}
 
         {/* Logs Section */}
-        {(isLoading || logs.length > 0) && (
+        {isAdminModeEnabled && (isLoading || logs.length > 0) && (
           <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700 mt-6">
             <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center">
               {isLoading && <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-blue-600 mr-3"></div>}
