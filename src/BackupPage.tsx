@@ -130,10 +130,28 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
   const [targetDatastores, setTargetDatastores] = useState<any[]>([]);
   const [isLoadingSourceDatastores, setIsLoadingSourceDatastores] = useState(false);
   const [isLoadingTargetDatastores, setIsLoadingTargetDatastores] = useState(false);
-  const [datastoreMapping, setDatastoreMapping] = useState<Record<string, string>>({});
+  const [datastoreMapping, setDatastoreMapping] = useState<Record<string, string>>(() => {
+    const envMapping = import.meta.env.VITE_DATASTORE_MAPPING;
+    try {
+      return envMapping ? JSON.parse(envMapping) : {};
+    } catch (e) {
+      console.error("Failed to parse VITE_DATASTORE_MAPPING from env", e);
+      return {};
+    }
+  });
   const [sourceCollections, setSourceCollections] = useState<any[]>([]);
   const [targetCollections, setTargetCollections] = useState<any[]>([]);
-  const [collectionMapping, setCollectionMapping] = useState<Record<string, string>>({});
+  const [collectionMapping, setCollectionMapping] = useState<Record<string, string>>(() => {
+    const envMapping = import.meta.env.VITE_COLLECTION_MAPPING;
+    try {
+      return envMapping ? JSON.parse(envMapping) : {};
+    } catch (e) {
+      console.error("Failed to parse VITE_COLLECTION_MAPPING from env", e);
+      return {};
+    }
+  });
+  const [shouldMigrateAgents, setShouldMigrateAgents] = useState(import.meta.env.VITE_MIGRATE_AGENTS !== 'false');
+  const [shouldMigrateNotebooks, setShouldMigrateNotebooks] = useState(import.meta.env.VITE_MIGRATE_NOTEBOOKS !== 'false');
   const [isStep1Complete, setIsStep1Complete] = useState(false);
   const [isRestoreComplete, setIsRestoreComplete] = useState(false);
 
@@ -1058,6 +1076,257 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
     setSelectionModalAction('backup');
     setPendingBackupData(backupData);
     setIsSelectionModalOpen(true);
+  });
+
+  const handleSingleClickMigration = async () => executeOperation('MigrateUserData', async () => {
+    addLog(`Starting single-click migration...`);
+    
+    let userGaiaIdHex = "";
+    try {
+      const userInfo = await api.getUserInfo(accessToken);
+      if (userInfo && userInfo.sub) {
+        userGaiaIdHex = `gaia:0x${BigInt(userInfo.sub).toString(16)}#`;
+      }
+    } catch (err: any) {
+      addLog(`Warning: Failed to fetch user info for GAIA ID filtering: ${err.message}`);
+    }
+    
+    const sourceConfig = {
+      ...apiConfig,
+      projectId: userTabConfig.sourceProject,
+      appLocation: userTabConfig.sourceLocation || apiConfig.appLocation,
+      appId: userTabConfig.sourceAppId || apiConfig.appId,
+    };
+
+    addLog(`Fetching agents from ${sourceConfig.appId}...`);
+    const agents: Agent[] = [];
+    let pageToken: string | undefined = undefined;
+    do {
+      const agentsResponse = await api.listResources('agents', sourceConfig, pageToken);
+      agents.push(...(agentsResponse.agents || []));
+      pageToken = agentsResponse.nextPageToken;
+    } while (pageToken);
+
+    const userAgents = [];
+    for (const agent of agents) {
+      try {
+        const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
+        let owner = "N/A";
+        if (policy && policy.bindings) {
+          const ownerBinding = policy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
+          if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
+            owner = getOwnerFromBinding(ownerBinding.members[0]);
+          }
+        }
+        
+        let isOwner = owner === userEmail;
+
+        if (userGaiaIdHex) {
+          const definitionKeys = Object.keys(agent).filter(key => key.toLowerCase().includes('agentdefinition'));
+          for (const key of definitionKeys) {
+            const definition = (agent as any)[key];
+            if (definition && definition.owner) {
+              if (definition.owner === userGaiaIdHex) isOwner = true;
+              else isOwner = false;
+              break;
+            }
+          }
+        }
+
+        if (isOwner) {
+          (agent as any).iamPolicy = policy;
+          userAgents.push(agent);
+        }
+      } catch (e) {
+        addLog(`  - Warning: Failed to backup IAM policy for agent ${agent.name}: ${(e as any).message}`);
+      }
+    }
+
+    addLog(`Fetching notebooks...`);
+    const response = await api.listNotebooks(sourceConfig);
+    const notebooks = response.notebooks || [];
+    const userNotebooks = [];
+
+    for (const nb of notebooks) {
+      const notebookId = nb.name.split('/').pop()!;
+      try {
+        const rawNotebook = await api.getNotebook(sourceConfig, notebookId);
+        if (rawNotebook.metadata?.userRole === 'PROJECT_ROLE_OWNER') {
+          const fullSources = [];
+          for (const source of (rawNotebook.sources || [])) {
+            const sourceId = source.name.split('/').pop()!;
+            try {
+              const fullSource = await api.getNotebookSource(sourceConfig, notebookId, sourceId);
+              fullSources.push(fullSource);
+            } catch (sourceErr: any) {
+              fullSources.push(source);
+            }
+          }
+          rawNotebook.sources = fullSources;
+          userNotebooks.push(rawNotebook);
+        }
+      } catch (nbErr: any) {
+        addLog(`  - Error fetching details for notebook ${notebookId}: ${nbErr.message}`);
+      }
+      await delay(500);
+    }
+
+    const targetConfig = {
+      ...apiConfig,
+      projectId: userTabConfig.targetProject,
+      appLocation: userTabConfig.targetLocation || apiConfig.appLocation,
+      appId: userTabConfig.targetAppId || apiConfig.appId,
+    };
+
+    addLog(`Starting restore to target environment...`);
+    
+    if (shouldMigrateAgents && userAgents.length > 0) {
+      addLog(`Restoring ${userAgents.length} agents to ${targetConfig.appId}...`);
+      await restoreAgentsIntoAssistant(userAgents, targetConfig, sourceConfig);
+    }
+
+    const report: ManualActionReportItem[] = [];
+
+    if (shouldMigrateAgents && userAgents.length > 0) {
+      for (const agent of userAgents) {
+        const dataStoreConnections = (agent as any).dataStoreConnections;
+        const iamPolicy = (agent as any).iamPolicy;
+        
+        const sharedWith: string[] = [];
+        
+        if (iamPolicy && iamPolicy.bindings) {
+          for (const binding of iamPolicy.bindings) {
+            if (binding.role === 'roles/discoveryengine.agentOwner') continue;
+            if (binding.members) {
+              const filteredMembers = binding.members.filter((member: string) => !userEmail || !member.includes(userEmail));
+              sharedWith.push(...filteredMembers);
+            }
+          }
+        }
+
+        const unmappedDatastores: string[] = [];
+        const knowledgeAttachments: string[] = [];
+        if (dataStoreConnections && dataStoreConnections.length > 0) {
+          for (const conn of dataStoreConnections) {
+            if (conn.dataStore) {
+              const oldDsId = conn.dataStore.split('/').pop();
+              if (oldDsId) {
+                knowledgeAttachments.push(oldDsId);
+                if (!datastoreMapping[oldDsId]) {
+                  unmappedDatastores.push(oldDsId);
+                }
+              }
+            }
+          }
+        }
+
+        const agentFiles: string[] = [];
+        const definitionKeys = Object.keys(agent).filter(key => key.toLowerCase().includes('agentdefinition'));
+        
+        for (const key of definitionKeys) {
+          const definition = (agent as any)[key];
+          if (definition) {
+            const files = definition.deployedAgentFiles || definition.agentFiles;
+            if (files && files.length > 0) {
+              for (const file of files) {
+                if (file.fileName) {
+                  agentFiles.push(file.fileName);
+                }
+              }
+            }
+          }
+        }
+        
+        report.push({
+          agentName: agent.displayName,
+          sharedWith: Array.from(new Set(sharedWith)),
+          unmappedDatastores: unmappedDatastores,
+          knowledgeAttachments: knowledgeAttachments,
+          agentFiles: agentFiles,
+        });
+      }
+    }
+
+    if (shouldMigrateNotebooks && userNotebooks.length > 0) {
+      addLog(`Restoring ${userNotebooks.length} notebooks to ${targetConfig.appId}...`);
+      
+      let existingNotebooks: any[] = [];
+      try {
+        const listResponse = await api.listNotebooks(targetConfig);
+        existingNotebooks = listResponse.notebooks || [];
+      } catch (listErr: any) {
+        addLog(`Warning: Could not list existing notebooks in target: ${listErr.message}`);
+      }
+
+      for (const nb of userNotebooks) {
+        const targetTitle = `${nb.title || 'Restored Notebook'} (Restored)`;
+        
+        const alreadyExists = existingNotebooks.some((n: any) => n.title === targetTitle);
+        if (alreadyExists) {
+          addLog(`  - Skipping notebook "${nb.title}" (already restored)`);
+          continue;
+        }
+
+        try {
+          const payload = {
+            title: targetTitle,
+            metadata: nb.metadata
+          };
+          const newNotebook = await api.createNotebook(targetConfig, payload);
+          const newNotebookId = newNotebook.name.split('/').pop()!;
+          addLog(`  - Created Notebook: ${newNotebookId}`);
+
+          if (nb.sources && nb.sources.length > 0) {
+            const sourceRequests = nb.sources.filter(isRestorableSource).map(mapSourceToPayload);
+            if (sourceRequests.length > 0) {
+              try {
+                addLog(`    - Adding ${sourceRequests.length} sources to notebook...`);
+                await api.batchCreateNotebookSources(targetConfig, newNotebookId, sourceRequests);
+                addLog(`    - Sources added.`);
+              } catch (srcErr: any) {
+                addLog(`    - Error adding sources: ${srcErr.message}`);
+              }
+            }
+          }
+          
+          // Collect report info
+          const sharedWith: string[] = [];
+          if (nb.iamPolicy && nb.iamPolicy.bindings) {
+            for (const binding of nb.iamPolicy.bindings) {
+              if (binding.role === 'roles/discoveryengine.agentOwner') continue;
+              if (binding.members) {
+                const filteredMembers = binding.members.filter((member: string) => !userEmail || !member.includes(userEmail));
+                sharedWith.push(...filteredMembers);
+              }
+            }
+          }
+
+          const localFiles: string[] = [];
+          if (nb.sources && nb.sources.length > 0) {
+            for (const source of nb.sources) {
+              if (source.metadata?.agentspaceMetadata) {
+                localFiles.push(source.metadata.agentspaceMetadata.documentName || source.title || 'Unnamed File');
+              } else if (!source.metadata?.googleDocsMetadata && !source.metadata?.youtubeMetadata && !source.metadata?.webpageMetadata && !source.url && !source.webScrapeConfig) {
+                localFiles.push(source.title || source.displayName || 'Unsupported Source');
+              }
+            }
+          }
+
+          report.push({
+            notebookTitle: nb.title || nb.displayName || 'Unnamed Notebook',
+            sharedWith: Array.from(new Set(sharedWith)),
+            localFiles: localFiles,
+          });
+
+        } catch (nbErr: any) {
+          addLog(`  - Error restoring notebook ${nb.title}: ${nbErr.message}`);
+        }
+      }
+    }
+    
+    setManualActionReport(report);
+    addLog(`Migration complete!`);
+    setIsRestoreComplete(true);
   });
 
   const handleUserRestoreCombined = async () => executeOperation('RestoreUserData', async () => {
@@ -2348,50 +2617,69 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
             <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-2">Step 2: Backup or Restore</h3>
             
             <div className="flex flex-col items-center justify-center py-4 space-y-6">
-              <div className="w-full max-w-md mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Upload Backup File for Restore</label>
-                <input 
-                  type="file" 
-                  accept=".json"
-                  disabled={!isStep1Complete}
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) {
-                      const reader = new FileReader();
-                      reader.onload = (e) => {
-                        setRestoreFileContent(e.target?.result as string);
-                        addLog(`File selected: ${file.name}`);
-                      };
-                      reader.readAsText(file);
-                    }
-                  }}
-                  className="block w-full text-sm text-gray-500 dark:text-white file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 disabled:file:bg-gray-100 disabled:file:text-gray-400"
-                />
-              </div>
+              {import.meta.env.VITE_SINGLE_CLICK_MIGRATION !== 'true' && (
+                <div className="w-full max-w-md mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Upload Backup File for Restore</label>
+                  <input 
+                    type="file" 
+                    accept=".json"
+                    disabled={!isStep1Complete}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                          setRestoreFileContent(e.target?.result as string);
+                          addLog(`File selected: ${file.name}`);
+                        };
+                        reader.readAsText(file);
+                      }
+                    }}
+                    className="block w-full text-sm text-gray-500 dark:text-white file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 disabled:file:bg-gray-100 disabled:file:text-gray-400"
+                  />
+                </div>
+              )}
 
-              <div className="flex gap-6">
-                <button
-                  onClick={handleUserBackupCombined}
-                  disabled={isLoading || !userTabConfig.sourceProject || !isStep1Complete}
-                  className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-md transition-colors disabled:bg-gray-300 flex items-center gap-2"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                  </svg>
-                  Backup My Data
-                </button>
-                
-                <button
-                  onClick={handleUserRestoreCombined}
-                  disabled={isLoading || !restoreFileContent || !userTabConfig.targetProject || !isStep1Complete}
-                  className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-xl shadow-md transition-colors disabled:bg-gray-300 flex items-center gap-2"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
-                  Restore My Data
-                </button>
-              </div>
+              {import.meta.env.VITE_SINGLE_CLICK_MIGRATION === 'true' ? (
+                <div className="flex flex-col gap-4">
+                  <div className="flex gap-6">
+                    <button
+                      onClick={handleSingleClickMigration}
+                      disabled={isLoading || !userTabConfig.sourceProject || !isStep1Complete}
+                      className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-xl shadow-md transition-colors disabled:bg-gray-300 flex items-center gap-2"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                      </svg>
+                      Migrate My Data
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex gap-6">
+                  <button
+                    onClick={handleUserBackupCombined}
+                    disabled={isLoading || !userTabConfig.sourceProject || !isStep1Complete}
+                    className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-md transition-colors disabled:bg-gray-300 flex items-center gap-2"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    </svg>
+                    Backup My Data
+                  </button>
+                  
+                  <button
+                    onClick={handleUserRestoreCombined}
+                    disabled={isLoading || !restoreFileContent || !userTabConfig.targetProject || !isStep1Complete}
+                    className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-xl shadow-md transition-colors disabled:bg-gray-300 flex items-center gap-2"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    Restore My Data
+                  </button>
+                </div>
+              )}
               
               <div className="text-xs text-gray-500 dark:text-white text-center max-w-md">
                 This will backup or restore all agents and notebooks owned by you in the current target project and location.
