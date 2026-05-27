@@ -720,7 +720,38 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
         .catch(err => {
           setUserIdStatus({ 
             status: 'fail', 
-            details: `Permission check failed for project ${targetProject}: ${err.message}.\n\nHow to fix (Admin Steps):\n\nStep 1: Create the custom role:\n\ngcloud iam roles create customBackupViewer \\\n    --project=${targetProject} \\\n    --title="Discovery Engine Custom Backup Viewer" \\\n    --permissions="discoveryengine.engines.list,discoveryengine.engines.get,discoveryengine.assistants.list,discoveryengine.assistants.get,discoveryengine.agents.list,discoveryengine.agents.get,discoveryengine.agents.manage,discoveryengine.agents.getIamPolicy,discoveryengine.notebooks.list,discoveryengine.notebooks.get" \\\n    --stage=GA\n\nStep 2: Assign the role to your user (Dynamic based on your login):\n\ngcloud projects add-iam-policy-binding ${targetProject} \\\n    --member="principal://iam.googleapis.com/locations/global/workforcePools/${poolId || 'YOUR_POOL_ID'}/subject/${userEmail}" \\\n    --role="projects/${targetProject}/roles/customBackupViewer"\n\nAlternatively, assign to your group if you prefer group-based access control:\n\ngcloud projects add-iam-policy-binding ${targetProject} \\\n    --member="principalSet://iam.googleapis.com/locations/global/workforcePools/${poolId || 'YOUR_POOL_ID'}/group/YOUR_GROUP_ID" \\\n    --role="projects/${targetProject}/roles/customBackupViewer"` 
+            details: `Permission check failed for project ${targetProject}: ${err.message}.
+
+How to fix (Admin Steps):
+
+Step 1: Create the custom role:
+
+gcloud iam roles create customBackupViewer \\
+    --project=${targetProject} \\
+    --title="Discovery Engine Custom Backup Viewer" \\
+    --permissions="discoveryengine.engines.list,\\
+discoveryengine.engines.get,\\
+discoveryengine.assistants.list,\\
+discoveryengine.assistants.get,\\
+discoveryengine.agents.list,\\
+discoveryengine.agents.get,\\
+discoveryengine.agents.manage,\\
+discoveryengine.agents.getIamPolicy,\\
+discoveryengine.notebooks.list,\\
+discoveryengine.notebooks.get" \\
+    --stage=GA
+
+Step 2: Assign the role to your user (Dynamic based on your login):
+
+gcloud projects add-iam-policy-binding ${targetProject} \\
+    --member="principal://iam.googleapis.com/locations/global/workforcePools/${poolId || 'YOUR_POOL_ID'}/subject/${userEmail}" \\
+    --role="projects/${targetProject}/roles/customBackupViewer"
+
+Alternatively, assign to your group if you prefer group-based access control:
+
+gcloud projects add-iam-policy-binding ${targetProject} \\
+    --member="principalSet://iam.googleapis.com/locations/global/workforcePools/${poolId || 'YOUR_POOL_ID'}/group/YOUR_GROUP_ID" \\
+    --role="projects/${targetProject}/roles/customBackupViewer"` 
           });
         });
     }
@@ -2576,12 +2607,18 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
                   )}
                 </div>
                 {userIdStatus.status === 'fail' && (
-                  <button onClick={() => setIsIdCheckExpanded(!isIdCheckExpanded)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">
-                    {isIdCheckExpanded ? 'Hide Details' : 'Show Details'}
+                  <button 
+                    onClick={() => {
+                      navigator.clipboard.writeText(userIdStatus.details || '');
+                      alert('Instructions copied to clipboard!');
+                    }} 
+                    className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                  >
+                    Copy Instructions
                   </button>
                 )}
               </div>
-              <div className="mt-2 text-xs text-gray-600">
+              <div className="mt-2 text-xs text-gray-600 whitespace-pre-wrap">
                 {userIdStatus.details}
               </div>
             </div>
