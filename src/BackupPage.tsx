@@ -29,6 +29,10 @@ import CurlInfoModal from './components/CurlInfoModal';
 
 interface BackupPageProps {
   accessToken: string;
+  sourceToken?: string;
+  targetToken?: string;
+  onGoogleSignIn?: () => void;
+  onWifSignIn?: () => void;
   projectNumber: string;
   setProjectNumber: (projectNumber: string) => void;
   userEmail: string;
@@ -103,7 +107,7 @@ const getOwnerFromBinding = (member: string): string => {
 
 // --- Main Page Component ---
 
-const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, setProjectNumber, userEmail, isSettingsOpen, onCloseSettings, poolId }) => {
+const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targetToken, onGoogleSignIn, onWifSignIn, projectNumber, setProjectNumber, userEmail, isSettingsOpen, onCloseSettings, poolId }) => {
   const [config, setConfig] = useState({
     appLocation: 'global',
     appId: '',
@@ -1079,6 +1083,25 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
   });
 
   const handleSingleClickMigration = async () => executeOperation('MigrateUserData', async () => {
+    const sourceIdp = import.meta.env.VITE_SOURCE_IDP || 'Google';
+    const targetIdp = import.meta.env.VITE_TARGET_IDP || 'Google';
+    const isIdpChangeEnabled = sourceIdp !== targetIdp;
+
+    if (isIdpChangeEnabled) {
+      if (!sourceToken) {
+        addLog(`Source token missing. Please log into ${sourceIdp}...`);
+        if (sourceIdp === 'Google') onGoogleSignIn?.();
+        else onWifSignIn?.();
+        return;
+      }
+      if (!targetToken) {
+        addLog(`Target token missing. Please log into ${targetIdp}...`);
+        if (targetIdp === 'Google') onGoogleSignIn?.();
+        else onWifSignIn?.();
+        return;
+      }
+    }
+
     addLog(`Starting single-click migration...`);
     
     let userGaiaIdHex = "";
@@ -1096,6 +1119,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
       projectId: userTabConfig.sourceProject,
       appLocation: userTabConfig.sourceLocation || apiConfig.appLocation,
       appId: userTabConfig.sourceAppId || apiConfig.appId,
+      accessToken: sourceToken || accessToken,
     };
 
     addLog(`Fetching agents from ${sourceConfig.appId}...`);
@@ -1176,6 +1200,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, projectNumber, set
       projectId: userTabConfig.targetProject,
       appLocation: userTabConfig.targetLocation || apiConfig.appLocation,
       appId: userTabConfig.targetAppId || apiConfig.appId,
+      accessToken: targetToken || accessToken,
     };
 
     addLog(`Starting restore to target environment...`);

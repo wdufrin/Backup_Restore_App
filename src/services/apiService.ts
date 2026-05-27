@@ -65,13 +65,19 @@ export const gapiRequest = async <T>(
     params?: any, 
     body?: any, 
     headers?: any,
-    suppressErrorLog: boolean = false
+    suppressErrorLog: boolean = false,
+    accessToken?: string
 ): Promise<T> => {
   const client = await getGapiClient();
     const requestHeaders = headers || {};
 
     if (projectId) {
         requestHeaders['X-Goog-User-Project'] = projectId;
+    }
+
+    const token = accessToken || client.getToken()?.access_token;
+    if (token) {
+        requestHeaders['Authorization'] = `Bearer ${token}`;
     }
 
     // Ensure Content-Type is set for POST/PUT if body exists
@@ -340,7 +346,7 @@ export const listResources = async (resourceType: 'agents' | 'engines' | 'dataSt
     url += `?pageSize=${pageSize}`;
     if (pageToken) url += `&pageToken=${pageToken}`;
 
-    return gapiRequest(url, 'GET', projectId);
+    return gapiRequest(url, 'GET', projectId, undefined, undefined, config.accessToken ? { 'Authorization': `Bearer ${config.accessToken}` } : undefined);
 };
 
 // FIX: Added missing createCollection function.
@@ -455,7 +461,7 @@ export const getEngine = async (name: string, config: Config) => {
         ? name 
         : `projects/${projectId}/locations/${appLocation}/collections/${collectionId}/engines/${name}`;
 
-    const engine = await gapiRequest<AppEngine>(`${baseUrl}/${DISCOVERY_API_BETA}/${resourcePath}`, 'GET', projectId);
+    const engine = await gapiRequest<AppEngine>(`${baseUrl}/${DISCOVERY_API_BETA}/${resourcePath}`, 'GET', projectId, undefined, undefined, config.accessToken ? { 'Authorization': `Bearer ${config.accessToken}` } : undefined);
     console.log('[DEBUG] getEngine:', engine);
     return engine;
 };
@@ -464,7 +470,7 @@ export const createEngine = async (engineId: string, payload: any, config: Confi
     const { projectId, appLocation, collectionId = 'default_collection' } = config;
     const baseUrl = getDiscoveryEngineUrl(appLocation);
     const url = `${baseUrl}/${DISCOVERY_API_BETA}/projects/${projectId}/locations/${appLocation}/collections/${collectionId}/engines?engineId=${engineId}`;
-    return gapiRequest<any>(url, 'POST', projectId, undefined, payload);
+    return gapiRequest<any>(url, 'POST', projectId, undefined, payload, config.accessToken ? { 'Authorization': `Bearer ${config.accessToken}` } : undefined);
 };
 
 export const updateEngine = async (name: string, payload: any, updateMask: string[], config: Config) => {
@@ -476,7 +482,7 @@ export const updateEngine = async (name: string, payload: any, updateMask: strin
         : `projects/${projectId}/locations/${appLocation}/collections/${collectionId}/engines/${name}`;
 
     const url = `${baseUrl}/${DISCOVERY_API_BETA}/${resourcePath}?updateMask=${updateMask.join(',')}`;
-    return gapiRequest<AppEngine>(url, 'PATCH', projectId, undefined, payload);
+    return gapiRequest<AppEngine>(url, 'PATCH', projectId, undefined, payload, config.accessToken ? { 'Authorization': `Bearer ${config.accessToken}` } : undefined);
 };
 
 export const getEngineIamPolicy = async (name: string, config: Config) => {
@@ -486,7 +492,7 @@ export const getEngineIamPolicy = async (name: string, config: Config) => {
         ? name 
         : `projects/${projectId}/locations/${appLocation}/collections/${collectionId}/engines/${name}`;
     const url = `${baseUrl}/v1/${resourcePath}:getIamPolicy`;
-    return gapiRequest<any>(url, 'GET', projectId);
+    return gapiRequest<any>(url, 'GET', projectId, undefined, undefined, config.accessToken ? { 'Authorization': `Bearer ${config.accessToken}` } : undefined);
 };
 
 export const setEngineIamPolicy = async (name: string, policy: any, config: Config) => {
@@ -496,7 +502,7 @@ export const setEngineIamPolicy = async (name: string, policy: any, config: Conf
         ? name 
         : `projects/${projectId}/locations/${appLocation}/collections/${collectionId}/engines/${name}`;
     const url = `${baseUrl}/v1/${resourcePath}:setIamPolicy`;
-    return gapiRequest<any>(url, 'POST', projectId, undefined, { policy });
+    return gapiRequest<any>(url, 'POST', projectId, undefined, { policy }, config.accessToken ? { 'Authorization': `Bearer ${config.accessToken}` } : undefined);
 };
 
 export const getWidgetConfig = async (name: string, config: Config) => {
@@ -1815,7 +1821,7 @@ export const listNotebooks = async (config: Config) => {
     const baseUrl = getDiscoveryEngineUrl(appLocation);
     // API: v1alpha/projects/{projectsId}/locations/{locationsId}/notebooks:listRecentlyViewed
     const url = `${baseUrl}/v1alpha/projects/${projectId}/locations/${appLocation}/notebooks:listRecentlyViewed`;
-    return gapiRequest<any>(url, 'GET', projectId);
+    return gapiRequest<any>(url, 'GET', projectId, undefined, undefined, config.accessToken ? { 'Authorization': `Bearer ${config.accessToken}` } : undefined);
 };
 
 export const getNotebook = async (config: Config, notebookId: string) => {
@@ -1823,7 +1829,7 @@ export const getNotebook = async (config: Config, notebookId: string) => {
     const baseUrl = getDiscoveryEngineUrl(appLocation);
     // API: v1alpha/projects/{projectsId}/locations/{locationsId}/notebooks/{notebookId}
     const url = `${baseUrl}/v1alpha/projects/${projectId}/locations/${appLocation}/notebooks/${notebookId}`;
-    return gapiRequest<any>(url, 'GET', projectId);
+    return gapiRequest<any>(url, 'GET', projectId, undefined, undefined, config.accessToken ? { 'Authorization': `Bearer ${config.accessToken}` } : undefined);
 };
 
 export const getNotebookSource = async (config: Config, notebookId: string, sourceId: string) => {
@@ -1831,7 +1837,7 @@ export const getNotebookSource = async (config: Config, notebookId: string, sour
     const baseUrl = getDiscoveryEngineUrl(appLocation);
     // API: v1alpha/projects/{project}/locations/{location}/notebooks/{notebookId}/sources/{sourceId}
     const url = `${baseUrl}/v1alpha/projects/${projectId}/locations/${appLocation}/notebooks/${notebookId}/sources/${sourceId}`;
-    return gapiRequest<any>(url, 'GET', projectId);
+    return gapiRequest<any>(url, 'GET', projectId, undefined, undefined, config.accessToken ? { 'Authorization': `Bearer ${config.accessToken}` } : undefined);
 };
 
 export const createNotebook = async (config: Config, payload: any) => {
@@ -1839,7 +1845,7 @@ export const createNotebook = async (config: Config, payload: any) => {
     const baseUrl = getDiscoveryEngineUrl(appLocation);
     // API: v1alpha/projects/{project}/locations/{location}/notebooks
     const url = `${baseUrl}/v1alpha/projects/${projectId}/locations/${appLocation}/notebooks`;
-    return gapiRequest<any>(url, 'POST', projectId, undefined, payload);
+    return gapiRequest<any>(url, 'POST', projectId, undefined, payload, config.accessToken ? { 'Authorization': `Bearer ${config.accessToken}` } : undefined);
 };
 
 export const batchCreateNotebookSources = async (config: Config, notebookId: string, requests: any[]) => {
@@ -1848,7 +1854,7 @@ export const batchCreateNotebookSources = async (config: Config, notebookId: str
     // API: v1alpha/projects/{project}/locations/{location}/notebooks/{notebookId}/sources:batchCreate
     const url = `${baseUrl}/v1alpha/projects/${projectId}/locations/${appLocation}/notebooks/${notebookId}/sources:batchCreate`;
     const payload = { userContents: requests };
-    return gapiRequest<any>(url, 'POST', projectId, undefined, payload);
+    return gapiRequest<any>(url, 'POST', projectId, undefined, payload, config.accessToken ? { 'Authorization': `Bearer ${config.accessToken}` } : undefined);
 };
 
 // Workforce Identity Pools

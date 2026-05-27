@@ -68,6 +68,7 @@ export interface Config {
   reasoningEngineLocation?: string;
   reasoningEngineId?: string;
   suppressErrorLog?: boolean;
+  accessToken?: string;
 }
 
 export interface WidgetConfig {

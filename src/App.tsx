@@ -14,7 +14,13 @@ declare global {
 
 function App() {
   const isAdminModeEnabled = import.meta.env.VITE_ENABLE_ADMIN_MODE === 'true';
+  const sourceIdp = import.meta.env.VITE_SOURCE_IDP || 'Google';
+  const targetIdp = import.meta.env.VITE_TARGET_IDP || 'Google';
+  const isIdpChangeEnabled = sourceIdp !== targetIdp;
+
   const [accessToken, setAccessToken] = useState<string>(() => sessionStorage.getItem('agentspace-accessToken') || '');
+  const [sourceToken, setSourceToken] = useState<string>(() => sessionStorage.getItem('agentspace-sourceToken') || '');
+  const [targetToken, setTargetToken] = useState<string>(() => sessionStorage.getItem('agentspace-targetToken') || '');
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem('theme');
     return saved === 'dark';
@@ -80,7 +86,20 @@ function App() {
           scope: 'https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/dialogflow',
           callback: (tokenResponse: any) => {
             if (tokenResponse && tokenResponse.access_token) {
-              handleSetAccessToken(tokenResponse.access_token);
+              const token = tokenResponse.access_token;
+              if (isIdpChangeEnabled) {
+                if (sourceIdp === 'Google') {
+                  setSourceToken(token);
+                  sessionStorage.setItem('agentspace-sourceToken', token);
+                }
+                if (targetIdp === 'Google') {
+                  setTargetToken(token);
+                  sessionStorage.setItem('agentspace-targetToken', token);
+                }
+                handleSetAccessToken(token);
+              } else {
+                handleSetAccessToken(token);
+              }
               
               // Fetch user profile
               fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
@@ -132,7 +151,20 @@ function App() {
       const stsResponse = await api.exchangeStsToken(wifConfigForExchange);
       console.log("STS Token Exchange successful!");
       
-      handleSetAccessToken(stsResponse.access_token);
+      const token = stsResponse.access_token;
+      if (isIdpChangeEnabled) {
+        if (sourceIdp === 'WiF') {
+          setSourceToken(token);
+          sessionStorage.setItem('agentspace-sourceToken', token);
+        }
+        if (targetIdp === 'WiF') {
+          setTargetToken(token);
+          sessionStorage.setItem('agentspace-targetToken', token);
+        }
+        handleSetAccessToken(token);
+      } else {
+        handleSetAccessToken(token);
+      }
       
       const profile = {
         name: email?.split('@')[0] || 'WiF User',
@@ -231,8 +263,18 @@ function App() {
             </div>
           ) : (
             <div className="flex gap-2">
-              <button onClick={handleGoogleSignIn} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm">Sign In with Google</button>
-              <button onClick={handleWifSignIn} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm">Sign In with WiF</button>
+              <button 
+                onClick={handleGoogleSignIn} 
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
+              >
+                {isIdpChangeEnabled ? `Sign In to ${sourceIdp === 'Google' ? 'Source' : 'Target'} (Google)` : 'Sign In with Google'}
+              </button>
+              <button 
+                onClick={handleWifSignIn} 
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
+              >
+                {isIdpChangeEnabled ? `Sign In to ${sourceIdp === 'WiF' ? 'Source' : 'Target'} (WiF)` : 'Sign In with WiF'}
+              </button>
             </div>
           )}
         </div>
@@ -245,6 +287,10 @@ function App() {
           {accessToken && isGapiReady ? (
             <BackupPage 
               accessToken={accessToken} 
+              sourceToken={sourceToken}
+              targetToken={targetToken}
+              onGoogleSignIn={handleGoogleSignIn}
+              onWifSignIn={handleWifSignIn} 
               projectNumber={projectNumber} 
               setProjectNumber={(num) => {
                 setProjectNumber(num);
@@ -259,8 +305,18 @@ function App() {
             <div className="flex flex-col items-center justify-center mt-20">
               <p className="text-gray-600 mb-4">Please sign in to access backup and restore functions.</p>
               <div className="flex gap-2 items-center">
-                <button onClick={handleGoogleSignIn} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm">Sign In with Google</button>
-                <button onClick={handleWifSignIn} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm">Sign In with WiF</button>
+                <button 
+                  onClick={handleGoogleSignIn} 
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
+                >
+                  {isIdpChangeEnabled ? `Sign In to ${sourceIdp === 'Google' ? 'Source' : 'Target'} (Google)` : 'Sign In with Google'}
+                </button>
+                <button 
+                  onClick={handleWifSignIn} 
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
+                >
+                  {isIdpChangeEnabled ? `Sign In to ${sourceIdp === 'WiF' ? 'Source' : 'Target'} (WiF)` : 'Sign In with WiF'}
+                </button>
                 {isAdminModeEnabled && (
                   <button onClick={() => setIsWifModalOpen(true)} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full shadow-md transition-colors" title="WIF Configuration">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
