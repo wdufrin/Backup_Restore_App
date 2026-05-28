@@ -167,6 +167,40 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
     localStorage.setItem('agentspace-step1Complete', String(isStep1Complete));
   }, [isStep1Complete]);
 
+  const [featureFlags, setFeatureFlags] = useState({
+    idpChangeEnabled: import.meta.env.VITE_IDP_CHANGE_ENABLED === 'true',
+    enableGoogleIdp: import.meta.env.VITE_ENABLE_GOOGLE_IDP !== 'false',
+    enableWifIdp: import.meta.env.VITE_ENABLE_WIF_IDP === 'true',
+  });
+
+  const [googleClientId, setGoogleClientId] = useState(import.meta.env.VITE_GOOGLE_CLIENT_ID || '');
+
+  const [wifConfigState, setWifConfigState] = useState({
+    userProject: import.meta.env.VITE_WIF_USER_PROJECT || '',
+    poolId: import.meta.env.VITE_WIF_POOL_ID || '',
+    providerId: import.meta.env.VITE_WIF_PROVIDER_ID || '',
+    clientId: import.meta.env.VITE_WIF_CLIENT_ID || '',
+    authEndpoint: import.meta.env.VITE_WIF_AUTH_ENDPOINT || '',
+    redirectUri: import.meta.env.VITE_WIF_REDIRECT_URI || '',
+  });
+
+  useEffect(() => {
+    if (activeTab === 'admin') {
+      if (userTabConfig.sourceProject && sourceApps.length === 0) {
+        setIsLoadingSourceApps(true);
+        fetchAppsForProject(userTabConfig.sourceProject, userTabConfig.sourceLocation)
+          .then(apps => setSourceApps(apps))
+          .finally(() => setIsLoadingSourceApps(false));
+      }
+      if (userTabConfig.targetProject && targetApps.length === 0) {
+        setIsLoadingTargetApps(true);
+        fetchAppsForProject(userTabConfig.targetProject, userTabConfig.targetLocation)
+          .then(apps => setTargetApps(apps))
+          .finally(() => setIsLoadingTargetApps(false));
+      }
+    }
+  }, [activeTab]);
+
   const fetchDataAssets = async (project: string, location: string) => {
     const configOverride = { ...apiConfig, projectId: project, appLocation: location };
     const allDatastores: any[] = [];
@@ -220,9 +254,10 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
     let content = `# --- App Mode & Feature Flags ---\n`;
     content += `VITE_ENABLE_ADMIN_MODE=${import.meta.env.VITE_ENABLE_ADMIN_MODE || 'true'}\n`;
     content += `VITE_SINGLE_CLICK_MIGRATION=${import.meta.env.VITE_SINGLE_CLICK_MIGRATION || 'true'}\n`;
-    content += `VITE_IDP_CHANGE_ENABLED=${import.meta.env.VITE_IDP_CHANGE_ENABLED || 'false'}\n`;
-    content += `VITE_ENABLE_GOOGLE_IDP=${import.meta.env.VITE_ENABLE_GOOGLE_IDP || 'true'}\n`;
-    content += `VITE_ENABLE_WIF_IDP=${import.meta.env.VITE_ENABLE_WIF_IDP || 'true'}\n\n`;
+    content += `VITE_IDP_CHANGE_ENABLED=${featureFlags.idpChangeEnabled}\n`;
+    content += `VITE_ENABLE_GOOGLE_IDP=${featureFlags.enableGoogleIdp}\n`;
+    content += `VITE_ENABLE_WIF_IDP=${featureFlags.enableWifIdp}\n`;
+    content += `VITE_GOOGLE_CLIENT_ID=${googleClientId}\n\n`;
 
     content += `# --- Source Environment ---\n`;
     content += `VITE_SOURCE_PROJECT=${userTabConfig.sourceProject}\n`;
@@ -236,6 +271,18 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
     content += `VITE_TARGET_APP_ID=${userTabConfig.targetAppId}\n`;
     content += `VITE_TARGET_APP_URL=${userTabConfig.targetAppUrl}\n`;
     content += `VITE_TARGET_IDP=${import.meta.env.VITE_TARGET_IDP || 'WiF'}\n\n`;
+
+    content += `# --- Workforce Identity Federation (WIF) / Entra ID Config ---\n`;
+    content += `VITE_WIF_USER_PROJECT=${wifConfigState.userProject}\n`;
+    content += `VITE_WIF_POOL_ID=${wifConfigState.poolId}\n`;
+    content += `VITE_WIF_PROVIDER_ID=${wifConfigState.providerId}\n`;
+    content += `VITE_WIF_CLIENT_ID=${wifConfigState.clientId}\n`;
+    content += `VITE_WIF_AUTH_ENDPOINT=${wifConfigState.authEndpoint}\n`;
+    content += `VITE_WIF_REDIRECT_URI=${wifConfigState.redirectUri}\n\n`;
+
+    content += `# --- Migration Settings ---\n`;
+    content += `VITE_MIGRATE_AGENTS=${shouldMigrateAgents}\n`;
+    content += `VITE_MIGRATE_NOTEBOOKS=${shouldMigrateNotebooks}\n\n`;
 
     content += `# --- Mappings ---\n`;
     content += `VITE_DATASTORE_MAPPING='${JSON.stringify(datastoreMapping)}'\n`;
@@ -317,6 +364,36 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
           }
           if (config.VITE_COLLECTION_MAPPING) {
             setCollectionMapping(JSON.parse(config.VITE_COLLECTION_MAPPING));
+          }
+
+          if (config.VITE_WIF_USER_PROJECT) {
+            setWifConfigState({
+              userProject: config.VITE_WIF_USER_PROJECT || '',
+              poolId: config.VITE_WIF_POOL_ID || '',
+              providerId: config.VITE_WIF_PROVIDER_ID || '',
+              clientId: config.VITE_WIF_CLIENT_ID || '',
+              authEndpoint: config.VITE_WIF_AUTH_ENDPOINT || '',
+              redirectUri: config.VITE_WIF_REDIRECT_URI || '',
+            });
+          }
+
+          if (config.VITE_IDP_CHANGE_ENABLED) {
+            setFeatureFlags({
+              idpChangeEnabled: config.VITE_IDP_CHANGE_ENABLED === 'true',
+              enableGoogleIdp: config.VITE_ENABLE_GOOGLE_IDP !== 'false',
+              enableWifIdp: config.VITE_ENABLE_WIF_IDP === 'true',
+            });
+          }
+
+          if (config.VITE_GOOGLE_CLIENT_ID) {
+            setGoogleClientId(config.VITE_GOOGLE_CLIENT_ID);
+          }
+
+          if (config.VITE_MIGRATE_AGENTS) {
+            setShouldMigrateAgents(config.VITE_MIGRATE_AGENTS === 'true');
+          }
+          if (config.VITE_MIGRATE_NOTEBOOKS) {
+            setShouldMigrateNotebooks(config.VITE_MIGRATE_NOTEBOOKS === 'true');
           }
 
           if (newUserTabConfig.sourceProject) {
@@ -3354,6 +3431,129 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                   Found {targetDatastores.length} datastores in target.
                 </div>
               )}
+            </div>
+
+            {/* Feature Flags */}
+            <div className="bg-gray-50 dark:bg-slate-700 p-4 rounded-lg border border-gray-200 dark:border-slate-600">
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-3">Feature Flags</h3>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="idpChangeEnabled" 
+                    checked={featureFlags.idpChangeEnabled} 
+                    onChange={(e) => setFeatureFlags({...featureFlags, idpChangeEnabled: e.target.checked})}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <label htmlFor="idpChangeEnabled" className="text-xs text-gray-700 dark:text-white font-medium cursor-pointer">
+                    IDP Change Enabled
+                  </label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="enableGoogleIdp" 
+                    checked={featureFlags.enableGoogleIdp} 
+                    onChange={(e) => setFeatureFlags({...featureFlags, enableGoogleIdp: e.target.checked})}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <label htmlFor="enableGoogleIdp" className="text-xs text-gray-700 dark:text-white font-medium cursor-pointer">
+                    Enable Google IDP
+                  </label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="enableWifIdp" 
+                    checked={featureFlags.enableWifIdp} 
+                    onChange={(e) => setFeatureFlags({...featureFlags, enableWifIdp: e.target.checked})}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <label htmlFor="enableWifIdp" className="text-xs text-gray-700 dark:text-white font-medium cursor-pointer">
+                    Enable WiF IDP
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* Google Configuration */}
+            {featureFlags.enableGoogleIdp && (
+              <div className="bg-gray-50 dark:bg-slate-700 p-4 rounded-lg border border-gray-200 dark:border-slate-600">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-3">Google Configuration</h3>
+                <div>
+                  <label className="block text-xs text-gray-500 dark:text-white mb-1">Google Client ID</label>
+                  <input 
+                    type="text" 
+                    value={googleClientId} 
+                    onChange={(e) => setGoogleClientId(e.target.value)} 
+                    className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" 
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* WIF Configuration */}
+            {featureFlags.enableWifIdp && (
+              <div className="bg-gray-50 dark:bg-slate-700 p-4 rounded-lg border border-gray-200 dark:border-slate-600">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-3">WIF Configuration</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-gray-500 dark:text-white mb-1">User Project</label>
+                    <input type="text" value={wifConfigState.userProject} onChange={(e) => setWifConfigState({...wifConfigState, userProject: e.target.value})} className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 dark:text-white mb-1">Pool ID</label>
+                    <input type="text" value={wifConfigState.poolId} onChange={(e) => setWifConfigState({...wifConfigState, poolId: e.target.value})} className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 dark:text-white mb-1">Provider ID</label>
+                    <input type="text" value={wifConfigState.providerId} onChange={(e) => setWifConfigState({...wifConfigState, providerId: e.target.value})} className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 dark:text-white mb-1">Client ID</label>
+                    <input type="text" value={wifConfigState.clientId} onChange={(e) => setWifConfigState({...wifConfigState, clientId: e.target.value})} className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-xs text-gray-500 dark:text-white mb-1">Auth Endpoint</label>
+                    <input type="text" value={wifConfigState.authEndpoint} onChange={(e) => setWifConfigState({...wifConfigState, authEndpoint: e.target.value})} className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-xs text-gray-500 dark:text-white mb-1">Redirect URI</label>
+                    <input type="text" value={wifConfigState.redirectUri} onChange={(e) => setWifConfigState({...wifConfigState, redirectUri: e.target.value})} className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Migration Settings */}
+            <div className="bg-gray-50 dark:bg-slate-700 p-4 rounded-lg border border-gray-200 dark:border-slate-600">
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-3">Migration Settings</h3>
+              <div className="flex gap-4">
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="migrateAgents" 
+                    checked={shouldMigrateAgents} 
+                    onChange={(e) => setShouldMigrateAgents(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <label htmlFor="migrateAgents" className="text-xs text-gray-700 dark:text-white font-medium cursor-pointer">
+                    Migrate Agents
+                  </label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="migrateNotebooks" 
+                    checked={shouldMigrateNotebooks} 
+                    onChange={(e) => setShouldMigrateNotebooks(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <label htmlFor="migrateNotebooks" className="text-xs text-gray-700 dark:text-white font-medium cursor-pointer">
+                    Migrate Notebooks
+                  </label>
+                </div>
+              </div>
             </div>
 
             {/* Collection Mapping */}
