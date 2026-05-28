@@ -17,6 +17,8 @@ function App() {
   const sourceIdp = import.meta.env.VITE_SOURCE_IDP || 'Google';
   const targetIdp = import.meta.env.VITE_TARGET_IDP || 'Google';
   const isIdpChangeEnabled = sourceIdp !== targetIdp;
+  const enableGoogleIdp = import.meta.env.VITE_ENABLE_GOOGLE_IDP === 'true';
+  const enableWifIdp = import.meta.env.VITE_ENABLE_WIF_IDP === 'true';
 
   const [accessToken, setAccessToken] = useState<string>(() => sessionStorage.getItem('agentspace-accessToken') || '');
   const [sourceToken, setSourceToken] = useState<string>(() => sessionStorage.getItem('agentspace-sourceToken') || '');
@@ -263,18 +265,22 @@ function App() {
             </div>
           ) : (
             <div className="flex gap-2">
-              <button 
-                onClick={handleGoogleSignIn} 
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
-              >
-                {isIdpChangeEnabled ? `Sign In to ${sourceIdp === 'Google' ? 'Source' : 'Target'} (Google)` : 'Sign In with Google'}
-              </button>
-              <button 
-                onClick={handleWifSignIn} 
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
-              >
-                {isIdpChangeEnabled ? `Sign In to ${sourceIdp === 'WiF' ? 'Source' : 'Target'} (WiF)` : 'Sign In with WiF'}
-              </button>
+              {enableGoogleIdp && (
+                <button 
+                  onClick={handleGoogleSignIn} 
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
+                >
+                  {isIdpChangeEnabled ? `Sign In to ${sourceIdp === 'Google' ? 'Source' : 'Target'} (Google)` : 'Sign In with Google'}
+                </button>
+              )}
+              {enableWifIdp && (
+                <button 
+                  onClick={handleWifSignIn} 
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
+                >
+                  {isIdpChangeEnabled ? `Sign In to ${sourceIdp === 'WiF' ? 'Source' : 'Target'} (WiF)` : 'Sign In with WiF'}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -291,6 +297,7 @@ function App() {
               targetToken={targetToken}
               onGoogleSignIn={handleGoogleSignIn}
               onWifSignIn={handleWifSignIn} 
+              onSignOut={handleSignOut}
               projectNumber={projectNumber} 
               setProjectNumber={(num) => {
                 setProjectNumber(num);
@@ -305,18 +312,22 @@ function App() {
             <div className="flex flex-col items-center justify-center mt-20">
               <p className="text-gray-600 mb-4">Please sign in to access backup and restore functions.</p>
               <div className="flex gap-2 items-center">
-                <button 
-                  onClick={handleGoogleSignIn} 
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
-                >
-                  {isIdpChangeEnabled ? `Sign In to ${sourceIdp === 'Google' ? 'Source' : 'Target'} (Google)` : 'Sign In with Google'}
-                </button>
-                <button 
-                  onClick={handleWifSignIn} 
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
-                >
-                  {isIdpChangeEnabled ? `Sign In to ${sourceIdp === 'WiF' ? 'Source' : 'Target'} (WiF)` : 'Sign In with WiF'}
-                </button>
+                {enableGoogleIdp && (
+                  <button 
+                    onClick={handleGoogleSignIn} 
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
+                  >
+                    {isIdpChangeEnabled ? `Sign In to ${sourceIdp === 'Google' ? 'Source' : 'Target'} (Google)` : 'Sign In with Google'}
+                  </button>
+                )}
+                {enableWifIdp && (
+                  <button 
+                    onClick={handleWifSignIn} 
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
+                  >
+                    {isIdpChangeEnabled ? `Sign In to ${sourceIdp === 'WiF' ? 'Source' : 'Target'} (WiF)` : 'Sign In with WiF'}
+                  </button>
+                )}
                 {isAdminModeEnabled && (
                   <button onClick={() => setIsWifModalOpen(true)} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full shadow-md transition-colors" title="WIF Configuration">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">

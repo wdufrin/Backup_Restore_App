@@ -33,6 +33,7 @@ interface BackupPageProps {
   targetToken?: string;
   onGoogleSignIn?: () => void;
   onWifSignIn?: () => void;
+  onSignOut?: () => void;
   projectNumber: string;
   setProjectNumber: (projectNumber: string) => void;
   userEmail: string;
@@ -107,7 +108,7 @@ const getOwnerFromBinding = (member: string): string => {
 
 // --- Main Page Component ---
 
-const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targetToken, onGoogleSignIn, onWifSignIn, projectNumber, setProjectNumber, userEmail, isSettingsOpen, onCloseSettings, poolId }) => {
+const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targetToken, onGoogleSignIn, onWifSignIn, onSignOut, projectNumber, setProjectNumber, userEmail, isSettingsOpen, onCloseSettings, poolId }) => {
   const [config, setConfig] = useState({
     appLocation: 'global',
     appId: '',
@@ -156,8 +157,15 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
   });
   const [shouldMigrateAgents, setShouldMigrateAgents] = useState(import.meta.env.VITE_MIGRATE_AGENTS !== 'false');
   const [shouldMigrateNotebooks, setShouldMigrateNotebooks] = useState(import.meta.env.VITE_MIGRATE_NOTEBOOKS !== 'false');
-  const [isStep1Complete, setIsStep1Complete] = useState(false);
+  const [isStep1Complete, setIsStep1Complete] = useState<boolean>(() => {
+    const saved = localStorage.getItem('agentspace-step1Complete');
+    return saved === 'true';
+  });
   const [isRestoreComplete, setIsRestoreComplete] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem('agentspace-step1Complete', String(isStep1Complete));
+  }, [isStep1Complete]);
 
   const fetchDataAssets = async (project: string, location: string) => {
     const configOverride = { ...apiConfig, projectId: project, appLocation: location };
@@ -209,17 +217,35 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
     }
   };
   const exportAdminConfig = () => {
-    const configToExport = {
-      userTabConfig,
-      datastoreMapping,
-      collectionMapping,
-    };
-    const jsonStr = JSON.stringify(configToExport, null, 2);
-    const blob = new Blob([jsonStr], { type: 'application/json' });
+    let content = `# --- App Mode & Feature Flags ---\n`;
+    content += `VITE_ENABLE_ADMIN_MODE=${import.meta.env.VITE_ENABLE_ADMIN_MODE || 'true'}\n`;
+    content += `VITE_SINGLE_CLICK_MIGRATION=${import.meta.env.VITE_SINGLE_CLICK_MIGRATION || 'true'}\n`;
+    content += `VITE_IDP_CHANGE_ENABLED=${import.meta.env.VITE_IDP_CHANGE_ENABLED || 'false'}\n`;
+    content += `VITE_ENABLE_GOOGLE_IDP=${import.meta.env.VITE_ENABLE_GOOGLE_IDP || 'true'}\n`;
+    content += `VITE_ENABLE_WIF_IDP=${import.meta.env.VITE_ENABLE_WIF_IDP || 'true'}\n\n`;
+
+    content += `# --- Source Environment ---\n`;
+    content += `VITE_SOURCE_PROJECT=${userTabConfig.sourceProject}\n`;
+    content += `VITE_SOURCE_LOCATION=${userTabConfig.sourceLocation}\n`;
+    content += `VITE_SOURCE_APP_ID=${userTabConfig.sourceAppId}\n`;
+    content += `VITE_SOURCE_IDP=${import.meta.env.VITE_SOURCE_IDP || 'Google'}\n\n`;
+
+    content += `# --- Target Environment ---\n`;
+    content += `VITE_TARGET_PROJECT=${userTabConfig.targetProject}\n`;
+    content += `VITE_TARGET_LOCATION=${userTabConfig.targetLocation}\n`;
+    content += `VITE_TARGET_APP_ID=${userTabConfig.targetAppId}\n`;
+    content += `VITE_TARGET_APP_URL=${userTabConfig.targetAppUrl}\n`;
+    content += `VITE_TARGET_IDP=${import.meta.env.VITE_TARGET_IDP || 'WiF'}\n\n`;
+
+    content += `# --- Mappings ---\n`;
+    content += `VITE_DATASTORE_MAPPING='${JSON.stringify(datastoreMapping)}'\n`;
+    content += `VITE_COLLECTION_MAPPING='${JSON.stringify(collectionMapping)}'\n`;
+
+    const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `admin_config__${new Date().toISOString().slice(0, 10)}.json`;
+    link.download = `.env.exported`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -233,27 +259,77 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const json = JSON.parse(e.target?.result as string);
-        if (json.userTabConfig) {
-          setUserTabConfig(json.userTabConfig);
+        const content = e.target?.result as string;
+        if (content.trim().startsWith('{')) {
+          // JSON format (Fallback for old exports)
+          const json = JSON.parse(content);
+          if (json.userTabConfig) {
+            setUserTabConfig(json.userTabConfig);
+            if (json.userTabConfig.sourceProject) {
+              const sourceLoc = json.userTabConfig.sourceLocation || 'global';
+              fetchAppsForProject(json.userTabConfig.sourceProject, sourceLoc).then(apps => setSourceApps(apps));
+            }
+            if (json.userTabConfig.targetProject) {
+              const targetLoc = json.userTabConfig.targetLocation || 'global';
+              fetchAppsForProject(json.userTabConfig.targetProject, targetLoc).then(apps => setTargetApps(apps));
+            }
+          }
+          if (json.datastoreMapping) {
+            setDatastoreMapping(json.datastoreMapping);
+          }
+          if (json.collectionMapping) {
+            setCollectionMapping(json.collectionMapping);
+          }
+          addLog(`Admin configuration imported successfully from JSON file.`);
+        } else {
+          // .env format
+          const lines = content.split('\n');
+          const config: any = {};
           
-          // Automatically fetch apps for source and target projects
-          if (json.userTabConfig.sourceProject) {
-            const sourceLoc = json.userTabConfig.sourceLocation || 'global';
-            fetchAppsForProject(json.userTabConfig.sourceProject, sourceLoc).then(apps => setSourceApps(apps));
+          lines.forEach(line => {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) return;
+            const parts = trimmed.split('=');
+            if (parts.length >= 2) {
+              const key = parts[0].trim();
+              let value = parts.slice(1).join('=').trim();
+              // Remove surrounding single quotes if any
+              if (value.startsWith("'") && value.endsWith("'")) {
+                value = value.slice(1, -1);
+              }
+              config[key] = value;
+            }
+          });
+
+          const newUserTabConfig = {
+            sourceProject: config.VITE_SOURCE_PROJECT || '',
+            sourceLocation: config.VITE_SOURCE_LOCATION || 'global',
+            sourceAppId: config.VITE_SOURCE_APP_ID || '',
+            targetProject: config.VITE_TARGET_PROJECT || '',
+            targetLocation: config.VITE_TARGET_LOCATION || 'global',
+            targetAppId: config.VITE_TARGET_APP_ID || '',
+            targetAppUrl: config.VITE_TARGET_APP_URL || '',
+          };
+          setUserTabConfig(newUserTabConfig);
+
+          if (config.VITE_DATASTORE_MAPPING) {
+            setDatastoreMapping(JSON.parse(config.VITE_DATASTORE_MAPPING));
           }
-          if (json.userTabConfig.targetProject) {
-            const targetLoc = json.userTabConfig.targetLocation || 'global';
-            fetchAppsForProject(json.userTabConfig.targetProject, targetLoc).then(apps => setTargetApps(apps));
+          if (config.VITE_COLLECTION_MAPPING) {
+            setCollectionMapping(JSON.parse(config.VITE_COLLECTION_MAPPING));
           }
+
+          if (newUserTabConfig.sourceProject) {
+            const sourceLoc = newUserTabConfig.sourceLocation || 'global';
+            fetchAppsForProject(newUserTabConfig.sourceProject, sourceLoc).then(apps => setSourceApps(apps));
+          }
+          if (newUserTabConfig.targetProject) {
+            const targetLoc = newUserTabConfig.targetLocation || 'global';
+            fetchAppsForProject(newUserTabConfig.targetProject, targetLoc).then(apps => setTargetApps(apps));
+          }
+
+          addLog(`Admin configuration imported successfully from .env file.`);
         }
-        if (json.datastoreMapping) {
-          setDatastoreMapping(json.datastoreMapping);
-        }
-        if (json.collectionMapping) {
-          setCollectionMapping(json.collectionMapping);
-        }
-        addLog(`Admin configuration imported successfully from ${file.name}`);
       } catch (err: any) {
         addLog(`Error importing admin configuration: ${err.message}`);
       }
@@ -2329,6 +2405,190 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
     ? sourceCollections.filter(col => collectionsInUse.has(col.name.split('/').pop()!))
     : sourceCollections;
 
+  const renderManualSteps = () => {
+    if (!isRestoreComplete) {
+      return (
+        <p className="text-xs text-gray-600">
+          After restore completes, manual steps required to finalize your agents will appear here.
+        </p>
+      );
+    }
+    return (
+      <div className="space-y-4">
+        <p className="text-xs text-gray-600 dark:text-white mb-3">
+          Please complete the following manual steps to finalize your restoration.
+        </p>
+        
+        <div className="space-y-4">
+          {manualActionReport.map((item, idx) => (
+            <div key={idx} className="bg-gray-50 dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm space-y-3">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                {item.agentName ? (
+                  <><span className="text-blue-500">🤖</span> {item.agentName}</>
+                ) : (
+                  <><span className="text-green-500">📓</span> {item.notebookTitle}</>
+                )}
+              </h3>
+              
+              {item.agentName ? (
+                <>
+                  <div className="text-xs text-gray-600">
+                    <p className="font-medium text-yellow-700 bg-yellow-50 p-2 rounded-lg border border-yellow-100">
+                      ℹ️ All restored agents are in draft and will need to be created/published.
+                    </p>
+                  </div>
+
+                  {item.sharedWith && item.sharedWith.length > 0 ? (
+                    <div>
+                      <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                        <span className="text-purple-500">👥</span> Reshare with:
+                      </h4>
+                      <div className="flex flex-wrap gap-1">
+                        {item.sharedWith.map((user, uidx) => (
+                          <span key={uidx} className="px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded text-[10px] font-medium">
+                            {user}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-gray-500 flex items-center gap-1">
+                      <span className="text-purple-300">👥</span> No sharing permissions found in backup.
+                    </div>
+                  )}
+
+                  {item.knowledgeAttachments && item.knowledgeAttachments.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                        <span className="text-blue-500">📚</span> Knowledge Attachments:
+                      </h4>
+                      <ul className="space-y-1 text-xs text-gray-600">
+                        {item.knowledgeAttachments.map((dsId, dsIdx) => (
+                          <li key={dsIdx} className="font-mono text-gray-500 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 inline-block mr-1 mb-1">
+                            {dsId}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {item.agentFiles && item.agentFiles.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                        <span className="text-blue-500">📄</span> Knowledge Files:
+                      </h4>
+                      <ul className="space-y-1 text-xs text-gray-600">
+                        {item.agentFiles.map((fileName, fIdx) => (
+                          <li key={fIdx} className="text-gray-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 inline-block mr-1 mb-1">
+                            {fileName}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {item.unmappedDatastores && item.unmappedDatastores.length > 0 ? (
+                    <div>
+                      <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                        <span className="text-red-500">📦</span> Unmapped Datastores (Action Required):
+                      </h4>
+                      <ul className="space-y-1 text-xs text-gray-600">
+                        {item.unmappedDatastores.map((dsId, dsIdx) => (
+                          <li key={dsIdx} className="font-mono text-gray-500 bg-red-50 px-1.5 py-0.5 rounded border border-red-100 inline-block mr-1 mb-1">
+                            {dsId}
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="text-[10px] text-red-500 mt-1">
+                        These datastores were not able to be remapped to new datastores and will need to be reviewed and manually re-added.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-gray-500 flex items-center gap-1">
+                      <span className="text-green-500">📦</span> All datastores successfully mapped or none attached.
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="text-xs text-gray-600 dark:text-white">
+                    <p className="font-medium text-blue-700 dark:text-white bg-blue-50 dark:bg-blue-900 p-2 rounded-lg border border-blue-100 dark:border-blue-800">
+                      ℹ️ Notebook restored. Please check sources and sharing.
+                    </p>
+                  </div>
+
+                  {item.sharedWith && item.sharedWith.length > 0 ? (
+                    <div>
+                      <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                        <span className="text-purple-500">👥</span> Reshare with:
+                      </h4>
+                      <div className="flex flex-wrap gap-1">
+                        {item.sharedWith.map((user, uidx) => (
+                          <span key={uidx} className="px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded text-[10px] font-medium">
+                            {user}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <h4 className="text-xs font-semibold text-gray-700 dark:text-white mb-1 flex items-center gap-1">
+                        <span className="text-purple-500">👥</span> Sharing:
+                      </h4>
+                      <p className="text-xs text-gray-600 dark:text-white">
+                        We are unable to retrieve shared users from source. Please manually document and reshare your notebooks if needed.
+                      </p>
+                    </div>
+                  )}
+
+                  {item.localFiles && item.localFiles.length > 0 ? (
+                    <div>
+                      <h4 className="text-xs font-semibold text-gray-700 dark:text-white mb-1 flex items-center gap-1">
+                        <span className="text-yellow-500">📁</span> Local Files (Action Required):
+                      </h4>
+                      <p className="text-xs text-gray-600 dark:text-white mb-1">
+                        The following local files were attached to the original notebook and need to be re-added manually:
+                      </p>
+                      <ul className="space-y-1 text-xs text-gray-600 dark:text-white">
+                        {item.localFiles.map((file, fIdx) => (
+                          <li key={fIdx} className="text-gray-700 dark:text-white bg-yellow-50 dark:bg-slate-900 px-1.5 py-0.5 rounded border border-yellow-100 dark:border-slate-700 inline-block mr-1 mb-1">
+                            {file}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-gray-500 flex items-center gap-1">
+                      <span className="text-yellow-300">📁</span> No local files detected or all sources are external.
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          ))}
+
+          {manualActionReport.length === 0 && (
+            <div className="text-center py-4 text-gray-500 text-sm">
+              No manual steps required! All items were successfully restored.
+            </div>
+          )}
+        </div>
+        
+        <div className="mt-4">
+          <button
+            onClick={downloadStepsAsText}
+            className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center justify-center gap-2"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Download Steps
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="max-w-7xl mx-auto p-6 text-gray-900">
       {/* Modals */}
@@ -2639,47 +2899,73 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             </div>
           )}
 
-          {/* Step 1: Connector Authentication */}
-          <div className="mb-6 p-4 rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700">
-            <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-2">Step 1: Authenticate Connectors</h3>
-            <div className="mb-3">
-              <p className="text-xs text-gray-600 dark:text-slate-300 mb-3">
-                Log into the target Gemini Enterprise app and ensure all required federated connectors (SharePoint, OneDrive, Outlook, etc.) are authenticated.
-              </p>
-              {userTabConfig.targetProject && (
-                <a 
-                  href={userTabConfig.targetAppUrl || "https://vertexaisearch.cloud.google.com/"}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-md flex items-center justify-center gap-2"
+          {import.meta.env.VITE_IDP_CHANGE_ENABLED === 'true' ? (
+            <>
+              {/* Step 1: Backup from Source */}
+              <div className="mb-6 p-4 rounded-lg border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-2">Step 1: Backup from Source</h3>
+                <p className="text-xs text-gray-600 dark:text-slate-300 mb-3">
+                  Log in with your source account and click "Backup My Data" to download your configuration.
+                </p>
+                <button
+                  onClick={handleUserBackupCombined}
+                  disabled={isLoading || !userTabConfig.sourceProject}
+                  className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-md transition-colors disabled:bg-gray-300 flex items-center gap-2"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                   </svg>
-                  <span>Open Gemini Enterprise</span>
-                </a>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              <input 
-                type="checkbox" 
-                id="step1Auth" 
-                checked={isStep1Complete} 
-                onChange={(e) => setIsStep1Complete(e.target.checked)}
-                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-              />
-              <label htmlFor="step1Auth" className="text-sm text-gray-700 dark:text-white font-medium cursor-pointer">
-                I have authenticated all required connectors in the target environment.
-              </label>
-            </div>
-          </div>
+                  Backup My Data
+                </button>
+              </div>
 
-          {/* Step 2: Backup & Restore */}
-          <div className={`mb-6 p-4 rounded-lg border ${isStep1Complete ? 'border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700' : 'border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 opacity-50'}`}>
-            <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-2">Step 2: Backup or Restore</h3>
-            
-            <div className="flex flex-col items-center justify-center py-4 space-y-6">
-              {import.meta.env.VITE_SINGLE_CLICK_MIGRATION !== 'true' && (
+              {/* Step 2: Switch Account & Verify Connectors */}
+              <div className="mb-6 p-4 rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-2">Step 2: Switch Account & Verify Connectors</h3>
+                <div className="mb-3">
+                  <p className="text-xs text-gray-600 dark:text-slate-300 mb-3">
+                    Log out of the source account, log into the target environment using the destination IDP, and ensure all required federated connectors are authenticated.
+                  </p>
+                  <button 
+                    onClick={onSignOut}
+                    className="w-full py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-md flex items-center justify-center gap-2 mb-3"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                    </svg>
+                    <span>Sign Out & Switch to {import.meta.env.VITE_TARGET_IDP || 'Target IDP'}</span>
+                  </button>
+                  {userTabConfig.targetAppUrl && (
+                    <a 
+                      href={userTabConfig.targetAppUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-md flex items-center justify-center gap-2 mb-3"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                      </svg>
+                      <span>Open Gemini Enterprise</span>
+                    </a>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="step2Auth" 
+                    checked={isStep1Complete} 
+                    onChange={(e) => setIsStep1Complete(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <label htmlFor="step2Auth" className="text-sm text-gray-700 dark:text-white font-medium cursor-pointer">
+                    I have authenticated all required connectors in the target environment.
+                  </label>
+                </div>
+              </div>
+
+              {/* Step 3: Restore to Target */}
+              <div className={`mb-6 p-4 rounded-lg border ${isStep1Complete ? 'border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700' : 'border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 opacity-50'}`}>
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-2">Step 3: Restore to Target</h3>
                 <div className="w-full max-w-md mb-4">
                   <label className="block text-sm font-medium text-gray-700 mb-2">Upload Backup File for Restore</label>
                   <input 
@@ -2700,238 +2986,143 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                     className="block w-full text-sm text-gray-500 dark:text-white file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 disabled:file:bg-gray-100 disabled:file:text-gray-400"
                   />
                 </div>
-              )}
+                <button
+                  onClick={handleUserRestoreCombined}
+                  disabled={isLoading || !restoreFileContent || !userTabConfig.targetProject || !isStep1Complete}
+                  className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-xl shadow-md transition-colors disabled:bg-gray-300 flex items-center gap-2"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Restore My Data
+                </button>
+              </div>
 
-              {import.meta.env.VITE_SINGLE_CLICK_MIGRATION === 'true' ? (
-                <div className="flex flex-col gap-4">
-                  <div className="flex gap-6">
-                    <button
-                      onClick={handleSingleClickMigration}
-                      disabled={isLoading || !userTabConfig.sourceProject || !isStep1Complete}
-                      className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-xl shadow-md transition-colors disabled:bg-gray-300 flex items-center gap-2"
+              {/* Step 4: Finalize */}
+              <div className={`mb-6 p-4 rounded-lg border ${isRestoreComplete ? 'border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700' : 'border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 opacity-50'}`}>
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-2">Step 4: Complete Setup</h3>
+                {renderManualSteps()}
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Step 1: Connector Authentication */}
+              <div className="mb-6 p-4 rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-2">Step 1: Authenticate Connectors</h3>
+                <div className="mb-3">
+                  <p className="text-xs text-gray-600 dark:text-slate-300 mb-3">
+                    Log into the target Gemini Enterprise app and ensure all required federated connectors (SharePoint, OneDrive, Outlook, etc.) are authenticated.
+                  </p>
+                  {userTabConfig.targetProject && (
+                    <a 
+                      href={userTabConfig.targetAppUrl || "https://vertexaisearch.cloud.google.com/"}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-md flex items-center justify-center gap-2"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                       </svg>
-                      Migrate My Data
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex gap-6">
-                  <button
-                    onClick={handleUserBackupCombined}
-                    disabled={isLoading || !userTabConfig.sourceProject || !isStep1Complete}
-                    className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-md transition-colors disabled:bg-gray-300 flex items-center gap-2"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                    </svg>
-                    Backup My Data
-                  </button>
-                  
-                  <button
-                    onClick={handleUserRestoreCombined}
-                    disabled={isLoading || !restoreFileContent || !userTabConfig.targetProject || !isStep1Complete}
-                    className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-xl shadow-md transition-colors disabled:bg-gray-300 flex items-center gap-2"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                    </svg>
-                    Restore My Data
-                  </button>
-                </div>
-              )}
-              
-              <div className="text-xs text-gray-500 dark:text-white text-center max-w-md">
-                This will backup or restore all agents and notebooks owned by you in the current target project and location.
-              </div>
-            </div>
-          </div>
-
-          {/* Step 3: Finalization */}
-          <div className={`mb-6 p-4 rounded-lg border ${isRestoreComplete ? 'border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700' : 'border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 opacity-50'}`}>
-            <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-2">Step 3: Complete Setup</h3>
-            
-            {!isRestoreComplete ? (
-              <p className="text-xs text-gray-600">
-                After restore completes, manual steps required to finalize your agents will appear here.
-              </p>
-            ) : (
-              <div className="space-y-4">
-                <p className="text-xs text-gray-600 dark:text-white mb-3">
-                  Please complete the following manual steps to finalize your restoration.
-                </p>
-                
-                <div className="space-y-4">
-                  {manualActionReport.map((item, idx) => (
-                    <div key={idx} className="bg-gray-50 dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm space-y-3">
-                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                        {item.agentName ? (
-                          <><span className="text-blue-500">🤖</span> {item.agentName}</>
-                        ) : (
-                          <><span className="text-green-500">📓</span> {item.notebookTitle}</>
-                        )}
-                      </h3>
-                      
-                      {item.agentName ? (
-                        <>
-                          <div className="text-xs text-gray-600">
-                            <p className="font-medium text-yellow-700 bg-yellow-50 p-2 rounded-lg border border-yellow-100">
-                              ℹ️ All restored agents are in draft and will need to be created/published.
-                            </p>
-                          </div>
-
-                          {item.sharedWith && item.sharedWith.length > 0 ? (
-                            <div>
-                              <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
-                                <span className="text-purple-500">👥</span> Reshare with:
-                              </h4>
-                              <div className="flex flex-wrap gap-1">
-                                {item.sharedWith.map((user, uidx) => (
-                                  <span key={uidx} className="px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded text-[10px] font-medium">
-                                    {user}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="text-xs text-gray-500 flex items-center gap-1">
-                              <span className="text-purple-300">👥</span> No sharing permissions found in backup.
-                            </div>
-                          )}
-
-                          {item.knowledgeAttachments && item.knowledgeAttachments.length > 0 && (
-                            <div>
-                              <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
-                                <span className="text-blue-500">📚</span> Knowledge Attachments:
-                              </h4>
-                              <ul className="space-y-1 text-xs text-gray-600">
-                                {item.knowledgeAttachments.map((dsId, dsIdx) => (
-                                  <li key={dsIdx} className="font-mono text-gray-500 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 inline-block mr-1 mb-1">
-                                    {dsId}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-
-                          {item.agentFiles && item.agentFiles.length > 0 && (
-                            <div>
-                              <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
-                                <span className="text-blue-500">📄</span> Knowledge Files:
-                              </h4>
-                              <ul className="space-y-1 text-xs text-gray-600">
-                                {item.agentFiles.map((fileName, fIdx) => (
-                                  <li key={fIdx} className="text-gray-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 inline-block mr-1 mb-1">
-                                    {fileName}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-
-                          {item.unmappedDatastores && item.unmappedDatastores.length > 0 ? (
-                            <div>
-                              <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
-                                <span className="text-red-500">📦</span> Unmapped Datastores (Action Required):
-                              </h4>
-                              <ul className="space-y-1 text-xs text-gray-600">
-                                {item.unmappedDatastores.map((dsId, dsIdx) => (
-                                  <li key={dsIdx} className="font-mono text-gray-500 bg-red-50 px-1.5 py-0.5 rounded border border-red-100 inline-block mr-1 mb-1">
-                                    {dsId}
-                                  </li>
-                                ))}
-                              </ul>
-                              <p className="text-[10px] text-red-500 mt-1">
-                                These datastores were not able to be remapped to new datastores and will need to be reviewed and manually re-added.
-                              </p>
-                            </div>
-                          ) : (
-                            <div className="text-xs text-gray-500 flex items-center gap-1">
-                              <span className="text-green-500">📦</span> All datastores successfully mapped or none attached.
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <>
-                          <div className="text-xs text-gray-600 dark:text-white">
-                            <p className="font-medium text-blue-700 dark:text-white bg-blue-50 dark:bg-blue-900 p-2 rounded-lg border border-blue-100 dark:border-blue-800">
-                              ℹ️ Notebook restored. Please check sources and sharing.
-                            </p>
-                          </div>
-
-                          {item.sharedWith && item.sharedWith.length > 0 ? (
-                            <div>
-                              <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
-                                <span className="text-purple-500">👥</span> Reshare with:
-                              </h4>
-                              <div className="flex flex-wrap gap-1">
-                                {item.sharedWith.map((user, uidx) => (
-                                  <span key={uidx} className="px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded text-[10px] font-medium">
-                                    {user}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          ) : (
-                            <div>
-                              <h4 className="text-xs font-semibold text-gray-700 dark:text-white mb-1 flex items-center gap-1">
-                                <span className="text-purple-500">👥</span> Sharing:
-                              </h4>
-                              <p className="text-xs text-gray-600 dark:text-white">
-                                We are unable to retrieve shared users from source. Please manually document and reshare your notebooks if needed.
-                              </p>
-                            </div>
-                          )}
-
-                          {item.localFiles && item.localFiles.length > 0 ? (
-                            <div>
-                              <h4 className="text-xs font-semibold text-gray-700 dark:text-white mb-1 flex items-center gap-1">
-                                <span className="text-yellow-500">📁</span> Local Files (Action Required):
-                              </h4>
-                              <p className="text-xs text-gray-600 dark:text-white mb-1">
-                                The following local files were attached to the original notebook and need to be re-added manually:
-                              </p>
-                              <ul className="space-y-1 text-xs text-gray-600 dark:text-white">
-                                {item.localFiles.map((file, fIdx) => (
-                                  <li key={fIdx} className="text-gray-700 dark:text-white bg-yellow-50 dark:bg-slate-900 px-1.5 py-0.5 rounded border border-yellow-100 dark:border-slate-700 inline-block mr-1 mb-1">
-                                    {file}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          ) : (
-                            <div className="text-xs text-gray-500 flex items-center gap-1">
-                              <span className="text-yellow-300">📁</span> No local files detected or all sources are external.
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  ))}
-
-                  {manualActionReport.length === 0 && (
-                    <div className="text-center py-4 text-gray-500 text-sm">
-                      No manual steps required! All items were successfully restored.
-                    </div>
+                      <span>Open Gemini Enterprise</span>
+                    </a>
                   )}
                 </div>
-                
-                <div className="mt-4">
-                  <button
-                    onClick={downloadStepsAsText}
-                    className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center justify-center gap-2"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                    </svg>
-                    Download Steps
-                  </button>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="step1Auth" 
+                    checked={isStep1Complete} 
+                    onChange={(e) => setIsStep1Complete(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <label htmlFor="step1Auth" className="text-sm text-gray-700 dark:text-white font-medium cursor-pointer">
+                    I have authenticated all required connectors in the target environment.
+                  </label>
                 </div>
               </div>
-            )}
-          </div>
+
+              {/* Step 2: Backup & Restore */}
+              <div className={`mb-6 p-4 rounded-lg border ${isStep1Complete ? 'border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700' : 'border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 opacity-50'}`}>
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-2">Step 2: Backup or Restore</h3>
+                
+                <div className="flex flex-col items-center justify-center py-4 space-y-6">
+                  {import.meta.env.VITE_SINGLE_CLICK_MIGRATION !== 'true' && (
+                    <div className="w-full max-w-md mb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Upload Backup File for Restore</label>
+                      <input 
+                        type="file" 
+                        accept=".json"
+                        disabled={!isStep1Complete}
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onload = (e) => {
+                              setRestoreFileContent(e.target?.result as string);
+                              addLog(`File selected: ${file.name}`);
+                            };
+                            reader.readAsText(file);
+                          }
+                        }}
+                        className="block w-full text-sm text-gray-500 dark:text-white file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 disabled:file:bg-gray-100 disabled:file:text-gray-400"
+                      />
+                    </div>
+                  )}
+
+                  {import.meta.env.VITE_SINGLE_CLICK_MIGRATION === 'true' ? (
+                    <div className="flex flex-col gap-4">
+                      <div className="flex gap-6">
+                        <button
+                          onClick={handleSingleClickMigration}
+                          disabled={isLoading || !userTabConfig.sourceProject || !isStep1Complete}
+                          className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-xl shadow-md transition-colors disabled:bg-gray-300 flex items-center gap-2"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                          </svg>
+                          Migrate My Data
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex gap-6">
+                      <button
+                        onClick={handleUserBackupCombined}
+                        disabled={isLoading || !userTabConfig.sourceProject || !isStep1Complete}
+                        className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-md transition-colors disabled:bg-gray-300 flex items-center gap-2"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                        </svg>
+                        Backup My Data
+                      </button>
+                      
+                      <button
+                        onClick={handleUserRestoreCombined}
+                        disabled={isLoading || !restoreFileContent || !userTabConfig.targetProject || !isStep1Complete}
+                        className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-xl shadow-md transition-colors disabled:bg-gray-300 flex items-center gap-2"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        Restore My Data
+                      </button>
+                    </div>
+                  )}
+                  
+                  <div className="text-xs text-gray-500 dark:text-white text-center max-w-md">
+                    This will backup or restore all agents and notebooks owned by you in the current target project and location.
+                  </div>
+                </div>
+              </div>
+
+              {/* Step 3: Finalization */}
+              <div className={`mb-6 p-4 rounded-lg border ${isRestoreComplete ? 'border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700' : 'border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 opacity-50'}`}>
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-2">Step 3: Complete Setup</h3>
+                {renderManualSteps()}
+              </div>
+            </>
+          )}
         </div>
       )}
 
