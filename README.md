@@ -1,76 +1,74 @@
-# React + TypeScript + Vite
+# Gemini Enterprise Backup & Recovery App
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This application provides self-service backup and recovery capabilities for Gemini Enterprise configurations (Agents and Notebooks). It supports multi-environment deployments and sequential account switching for cross-IDP migrations.
 
-Currently, two official plugins are available:
+## How to Run Locally
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+1. **Install Dependencies**:
+   ```bash
+   npm install
+   ```
 
-## React Compiler
+2. **Start Development Server**:
+   ```bash
+   npm run dev
+   ```
+   The app will be available at `http://localhost:5173`.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Configuration (`.env` file)
 
-## Expanding the ESLint configuration
+The application is configured using environment variables in the `.env` file. The file is organized into sections:
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+*   **App Mode & Feature Flags**: Toggles for admin mode, single-click migration, and IDP visibility.
+*   **Source & Target Environments**: Project IDs, locations, and App IDs for source and target.
+*   **WIF Configuration**: Settings for Workforce Identity Federation (Entra ID).
+*   **Migration Settings**: Toggles to select what to migrate.
+*   **Google Client ID**: The OAuth client ID for Google login.
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+Example `.env` structure:
+```env
+VITE_ENABLE_ADMIN_MODE=true
+VITE_IDP_CHANGE_ENABLED=true
+VITE_ENABLE_GOOGLE_IDP=true
+VITE_ENABLE_WIF_IDP=true
+VITE_GOOGLE_CLIENT_ID=...
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Using the Admin View Tab
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+The **Admin View** tab allows you to configure the application state dynamically:
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+1.  **Configure Environments**: Set Source and Target Project IDs, Locations, and App IDs.
+2.  **Fetch Assets**: Click "Fetch Source Assets" or "Fetch Target Assets" to load datastores and collections.
+3.  **Feature Flags & Mappings**: Toggle IDPs and map collections for connectors.
+4.  **Export Config**: Generates a `.env.exported` file with your current settings that you can copy into your active `.env` file.
+5.  **Import Config**: Supports loading configurations from both JSON and `.env` formats.
+
+## Deployment to Cloud Run
+
+The application can be deployed to Cloud Run using the provided `cloudbuild.yaml` or manually.
+
+### Using Cloud Build
+Run the following command to build and deploy:
+```bash
+gcloud builds submit --config cloudbuild.yaml
 ```
+*Note: Cloud Build will use the project ID specified in your gcloud config.*
+
+### Manual Deployment
+1. **Build Image**:
+   ```bash
+   docker build -t gcr.io/YOUR_PROJECT_ID/backup-restore-app .
+   ```
+2. **Push Image**:
+   ```bash
+   docker push gcr.io/YOUR_PROJECT_ID/backup-restore-app
+   ```
+3. **Deploy**:
+   ```bash
+   gcloud run deploy backup-restore-app --image gcr.io/YOUR_PROJECT_ID/backup-restore-app --platform managed
+   ```
+
 
 ## IAM Configuration for Workforce Identity (Entra ID / Okta)
 
@@ -112,3 +110,36 @@ gcloud projects add-iam-policy-binding ancient-sandbox-322523 \
 
 ### 3. Note on Permission Check
 The application performs a permission check by attempting to list engines. If it fails, it will show a red **FAIL** status in the UI. Ensure the project ID is set in the settings (Active Project dropdown) to run the check.
+
+## How to Use the App (Modes of Operation)
+
+The application supports 3 different modes of operation:
+
+### 1. Admin Mode
+*   **When to use**: When you need to configure environment mappings, load data assets, and generate the `.env` file.
+*   **Flags needed**: `VITE_ENABLE_ADMIN_MODE=true`
+*   **How to use**: This unlocks the "Admin View" tab where you can manage configurations and export them.
+
+### 2. User Only with Single IDP
+*   **When to use**: When regular users want to backup or restore their personal agents and notebooks within the same Identity Provider (no account switching needed).
+*   **Flags needed**: `VITE_IDP_CHANGE_ENABLED=false` (and optionally `VITE_ENABLE_ADMIN_MODE=false` to hide the admin tab from regular users).
+*   **How to use**: Regular users operate in the "User View". They can use the "Backup My Data" and "Restore My Data" buttons to download and upload configuration files.
+
+### 3. Cross-IDP Mode
+*   **When to use**: When migrating resources across different organizations or IDPs (e.g., from Google to Entra ID) where simultaneous login is not possible.
+*   **Flags needed**: `VITE_IDP_CHANGE_ENABLED=true`
+*   **How to use**: This activates the 4-step guided workflow in the User View:
+    1. Backup from Source.
+    2. Sign Out and Switch to the Target IDP (using the provided button).
+    3. Verify connectors in the target environment.
+    4. Upload the file and Restore.
+
+## Limitations of the Migration Tool
+
+While this tool simplifies the migration process, please be aware of the following limitations:
+
+*   **Draft Status**: All restored agents are created in **Draft** status. You must manually review and publish them in the target environment.
+*   **Local Files**: Local files attached to Notebooks cannot be automatically transferred and must be re-uploaded manually in the target environment.
+*   **Sharing Permissions**: Sharing permissions and user roles may not transfer automatically across different IDPs or organizations. You will need to reshare resources manually.
+*   **Unmapped Datastores**: If a datastore in the source cannot be mapped to a corresponding datastore in the target, it will be skipped and reported in the finalization steps for manual resolution.
+*   **Stateless Cloud Run**: When deployed to Cloud Run, changes made in the Admin tab cannot be saved permanently to the server. You must export the config and update your `.env` file.
