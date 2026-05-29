@@ -4,7 +4,7 @@ steps:
     args:
       - 'build'
       - '-t'
-      - 'gcr.io/$PROJECT_ID/backup-restore-app:$COMMIT_SHA'
+      - 'gcr.io/$PROJECT_ID/backup-restore-app:latest'
       - '.'
       - '-f'
       - 'Dockerfile'
@@ -14,24 +14,32 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
-      - 'gcr.io/$PROJECT_ID/backup-restore-app:$COMMIT_SHA'
+      - 'gcr.io/$PROJECT_ID/backup-restore-app:latest'
     id: Push
 
-  # Deploy to GKE
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:slim'
-    entrypoint: 'bash'
+  # Update the image in the deployment manifest
+  - name: 'ubuntu'
     args:
-      - '-c'
-      - |
-        # TODO: Replace CLUSTER_NAME and CLUSTER_ZONE with your actual GKE cluster details
-        gcloud container clusters get-credentials CLUSTER_NAME --zone CLUSTER_ZONE --project $PROJECT_ID
-        
-        # Update the image in the deployment manifest to the one just built
-        sed -i "s|gcr.io/ancient-sandbox-322523/backup-restore-app:latest|gcr.io/$PROJECT_ID/backup-restore-app:$COMMIT_SHA|g" kubernetes/deployment.yaml
-        
-        # Apply the manifests
-        kubectl apply -f kubernetes/
+      - 'sed'
+      - '-i'
+      - 's|gcr.io/ancient-sandbox-322523/backup-restore-app:latest|gcr.io/$PROJECT_ID/backup-restore-app:latest|g'
+      - 'kubernetes/deployment.yaml'
+    id: Update-Manifest
+
+  # Deploy to GKE using the official kubectl builder
+  - name: 'gcr.io/cloud-builders/kubectl'
+    args:
+      - 'apply'
+      - '-f'
+      - 'kubernetes/'
+    env:
+      - 'CLOUDSDK_CONTAINER_CLUSTER=$_CLUSTER_NAME'
+      - 'CLOUDSDK_COMPUTE_REGION=$_CLUSTER_REGION'
     id: Deploy
 
 images:
-  - 'gcr.io/$PROJECT_ID/backup-restore-app:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/backup-restore-app:latest'
+
+substitutions:
+  _CLUSTER_NAME: 'test-cluster'
+  _CLUSTER_REGION: 'us-central1'
