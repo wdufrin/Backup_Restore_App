@@ -4,7 +4,7 @@ import { initGapiClient } from './services/gapiService';
 import * as api from './services/apiService';
 import './App.css';
 
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '180054373655-2b600fnjissdmll4ipj2ndhr0i2h03fj.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 
 declare global {
     interface Window {
@@ -17,8 +17,8 @@ function App() {
   const sourceIdp = import.meta.env.VITE_SOURCE_IDP || 'Google';
   const targetIdp = import.meta.env.VITE_TARGET_IDP || 'Google';
   const isIdpChangeEnabled = sourceIdp !== targetIdp;
-  const enableGoogleIdp = import.meta.env.VITE_ENABLE_GOOGLE_IDP === 'true';
-  const enableWifIdp = import.meta.env.VITE_ENABLE_WIF_IDP === 'true';
+  const enableGoogleIdp = import.meta.env.VITE_ENABLE_GOOGLE_IDP !== 'false';
+  const enableWifIdp = import.meta.env.VITE_ENABLE_WIF_IDP !== 'false';
 
   const [accessToken, setAccessToken] = useState<string>(() => sessionStorage.getItem('agentspace-accessToken') || '');
   const [sourceToken, setSourceToken] = useState<string>(() => sessionStorage.getItem('agentspace-sourceToken') || '');

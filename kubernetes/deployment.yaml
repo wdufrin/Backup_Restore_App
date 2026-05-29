@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backup-restore-app
+  labels:
+    app: backup-restore-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: backup-restore-app
+  template:
+    metadata:
+      labels:
+        app: backup-restore-app
+    spec:
+      containers:
+      - name: backup-restore-app
+        image: gcr.io/ancient-sandbox-322523/backup-restore-app:latest # Replace with your actual project ID if different
+        ports:
+        - containerPort: 8080
+        env:
+        - name: PORT
+          value: "8080"
+        # Note: Vite bakes VITE_ environment variables at build time by default.
+        # If you modify the app to read runtime environment variables (e.g., from a JSON file),
+        # you can mount a ConfigMap here or use environment variables.

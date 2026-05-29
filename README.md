@@ -44,6 +44,38 @@ The **Admin View** tab allows you to configure the application state dynamically
 4.  **Export Config**: Generates a `.env.exported` file with your current settings that you can copy into your active `.env` file.
 5.  **Import Config**: Supports loading configurations from both JSON and `.env` formats.
 
+
+## Deployment to GKE
+
+The application can be deployed to Google Kubernetes Engine (GKE). The Kubernetes manifests are located in the `kubernetes/` directory.
+
+### Prerequisites
+1.  A running GKE cluster.
+2.  `kubectl` installed and configured to connect to your cluster.
+
+### Using Cloud Build
+The provided `cloudbuild-gke.yaml` is configured to build the image, push it to GCR, and deploy it to your GKE cluster.
+
+1.  Open `cloudbuild-gke.yaml`.
+2.  Replace `CLUSTER_NAME` and `CLUSTER_ZONE` with your GKE cluster's name and zone.
+3.  Run the build:
+    ```bash
+    gcloud builds submit --config cloudbuild-gke.yaml
+    ```
+
+### Manual Deployment
+1.  **Build and Push the Image**:
+    ```bash
+    docker build -t gcr.io/YOUR_PROJECT_ID/backup-restore-app:latest .
+    docker push gcr.io/YOUR_PROJECT_ID/backup-restore-app:latest
+    ```
+2.  **Update the Image in the Manifest**:
+    Open `kubernetes/deployment.yaml` and replace `gcr.io/ancient-sandbox-322523/backup-restore-app:latest` with your image path.
+3.  **Apply the Manifests**:
+    ```bash
+    kubectl apply -f kubernetes/
+    ```
+
 ## Deployment to Cloud Run
 
 The application can be deployed to Cloud Run using the provided `cloudbuild.yaml` or manually.
