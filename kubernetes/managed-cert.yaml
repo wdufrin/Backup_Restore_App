@@ -1,0 +1,7 @@
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: backup-restore-cert
+spec:
+  domains:
+    - backup.ge-dufrin.com

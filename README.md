@@ -58,6 +58,7 @@ Create a custom role named `customBackupViewer` at the project level with the fo
 - `discoveryengine.agents.getIamPolicy` (Required for ownership verification)
 - `discoveryengine.notebooks.list`
 - `discoveryengine.notebooks.get`
+- `serviceusage.services.use` (Required to call enabled APIs in the project)
 
 You can create it using `gcloud`:
 ```bash
@@ -65,7 +66,7 @@ gcloud iam roles create customBackupViewer \
     --project=ancient-sandbox-322523 \
     --title="Discovery Engine Custom Backup Viewer" \
     --description="Read-only access to list engines, assistants, agents, and notebooks for backup purposes." \
-    --permissions="discoveryengine.engines.list,discoveryengine.engines.get,discoveryengine.assistants.list,discoveryengine.assistants.get,discoveryengine.agents.list,discoveryengine.agents.get,discoveryengine.agents.manage,discoveryengine.agents.getIamPolicy,discoveryengine.notebooks.list,discoveryengine.notebooks.get" \
+    --permissions="discoveryengine.engines.list,discoveryengine.engines.get,discoveryengine.assistants.list,discoveryengine.assistants.get,discoveryengine.agents.list,discoveryengine.agents.get,discoveryengine.agents.manage,discoveryengine.agents.getIamPolicy,discoveryengine.notebooks.list,discoveryengine.notebooks.get,serviceusage.services.use" \
     --stage=GA
 ```
 
@@ -154,6 +155,9 @@ gcloud builds submit --config cloudbuild.yaml
    ```
 
 ### Deployment to GKE
+
+> [!WARNING]
+> **Work In Progress (WIP)**: The GKE deployment is currently under development and testing.
 
 The application can be deployed to Google Kubernetes Engine (GKE). The Kubernetes manifests are located in the `kubernetes/` directory.
 

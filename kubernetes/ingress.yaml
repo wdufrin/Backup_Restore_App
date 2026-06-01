@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: backup-restore-ingress
+  annotations:
+    networking.gke.io/managed-certificates: backup-restore-cert
+spec:
+  rules:
+  - host: backup.ge-dufrin.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: backup-restore-app-service
+            port:
+              number: 80
