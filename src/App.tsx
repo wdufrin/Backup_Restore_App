@@ -58,6 +58,18 @@ function App() {
   const [isWifModalOpen, setIsWifModalOpen] = useState(false);
   const tokenClient = useRef<any>(null);
 
+  const handleResetWifConfig = () => {
+    localStorage.removeItem('agentspace-wifConfig');
+    setWifConfig({
+      userProject: import.meta.env.VITE_WIF_USER_PROJECT || '',
+      poolId: import.meta.env.VITE_WIF_POOL_ID || '',
+      providerId: import.meta.env.VITE_WIF_PROVIDER_ID || '',
+      clientId: import.meta.env.VITE_WIF_CLIENT_ID || '',
+      authEndpoint: import.meta.env.VITE_WIF_AUTH_ENDPOINT || '',
+      redirectUri: import.meta.env.VITE_WIF_REDIRECT_URI || '',
+    });
+  };
+
   const handleSetAccessToken = useCallback((token: string) => {
     const trimmedToken = token.trim();
     setAccessToken(trimmedToken);
@@ -391,15 +403,23 @@ function App() {
                   <input type="file" accept=".json" onChange={importWifConfig} className="hidden" />
                 </label>
               </div>
-              <button 
-                onClick={() => {
-                  localStorage.setItem('agentspace-wifConfig', JSON.stringify(wifConfig));
-                  setIsWifModalOpen(false);
-                }} 
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg"
-              >
-                Save
-              </button>
+              <div className="flex gap-2">
+                <button 
+                  onClick={handleResetWifConfig} 
+                  className="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white text-sm font-semibold rounded-lg"
+                >
+                  Reset
+                </button>
+                <button 
+                  onClick={() => {
+                    localStorage.setItem('agentspace-wifConfig', JSON.stringify(wifConfig));
+                    setIsWifModalOpen(false);
+                  }} 
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg"
+                >
+                  Save
+                </button>
+              </div>
             </div>
           </div>
         </div>

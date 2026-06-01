@@ -119,14 +119,17 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
   });
   const isAdminModeEnabled = import.meta.env.VITE_ENABLE_ADMIN_MODE === 'true';
   const [activeTab, setActiveTab] = useState<'admin' | 'user'>(isAdminModeEnabled ? 'admin' : 'user');
-  const [userTabConfig, setUserTabConfig] = useState({
-    sourceProject: import.meta.env.VITE_SOURCE_PROJECT || '',
-    sourceLocation: import.meta.env.VITE_SOURCE_LOCATION || 'global',
-    sourceAppId: import.meta.env.VITE_SOURCE_APP_ID || '',
-    targetProject: import.meta.env.VITE_TARGET_PROJECT || '',
-    targetLocation: import.meta.env.VITE_TARGET_LOCATION || 'global',
-    targetAppId: import.meta.env.VITE_TARGET_APP_ID || '',
-    targetAppUrl: import.meta.env.VITE_TARGET_APP_URL || '',
+  const [userTabConfig, setUserTabConfig] = useState(() => {
+    const saved = localStorage.getItem('agentspace-userTabConfig');
+    return saved ? JSON.parse(saved) : {
+      sourceProject: import.meta.env.VITE_SOURCE_PROJECT || '',
+      sourceLocation: import.meta.env.VITE_SOURCE_LOCATION || 'global',
+      sourceAppId: import.meta.env.VITE_SOURCE_APP_ID || '',
+      targetProject: import.meta.env.VITE_TARGET_PROJECT || '',
+      targetLocation: import.meta.env.VITE_TARGET_LOCATION || 'global',
+      targetAppId: import.meta.env.VITE_TARGET_APP_ID || '',
+      targetAppUrl: import.meta.env.VITE_TARGET_APP_URL || '',
+    };
   });
   const [isUserConfigModalOpen, setIsUserConfigModalOpen] = useState(false);
   const [sourceApps, setSourceApps] = useState<any[]>([]);
@@ -412,6 +415,25 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
       }
     };
     reader.readAsText(file);
+  };
+
+  const handleSaveAdminConfig = () => {
+    localStorage.setItem('agentspace-userTabConfig', JSON.stringify(userTabConfig));
+    addLog(`Admin configuration saved to browser storage.`);
+  };
+
+  const handleResetAdminConfig = () => {
+    localStorage.removeItem('agentspace-userTabConfig');
+    setUserTabConfig({
+      sourceProject: import.meta.env.VITE_SOURCE_PROJECT || '',
+      sourceLocation: import.meta.env.VITE_SOURCE_LOCATION || 'global',
+      sourceAppId: import.meta.env.VITE_SOURCE_APP_ID || '',
+      targetProject: import.meta.env.VITE_TARGET_PROJECT || '',
+      targetLocation: import.meta.env.VITE_TARGET_LOCATION || 'global',
+      targetAppId: import.meta.env.VITE_TARGET_APP_ID || '',
+      targetAppUrl: import.meta.env.VITE_TARGET_APP_URL || '',
+    });
+    addLog(`Admin configuration reset to environment defaults.`);
   };
 
   const [isLoadingSourceApps, setIsLoadingSourceApps] = useState(false);
@@ -3209,6 +3231,18 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           <p className="text-sm text-gray-500 dark:text-slate-400 mb-4">Configure source and target environments and map datastores.</p>
           
           <div className="flex justify-end gap-2 mb-4">
+            <button
+              onClick={handleResetAdminConfig}
+              className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-1"
+            >
+              Reset
+            </button>
+            <button
+              onClick={handleSaveAdminConfig}
+              className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-1"
+            >
+              Save
+            </button>
             <button
               onClick={exportAdminConfig}
               className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-1"
