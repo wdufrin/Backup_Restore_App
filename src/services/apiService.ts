@@ -651,6 +651,9 @@ export const shareAgent = async (name: string, config: Config) => {
     return getAgent(name, config);
 };
 
+
+
+
 export const deleteResource = async (name: string, config: Config) => {
     const baseUrl = getDiscoveryEngineUrl(config.appLocation);
     return gapiRequest(`${baseUrl}/${DISCOVERY_API_VERSION}/${name}`, 'DELETE', config.projectId);
@@ -775,7 +778,7 @@ export const signInWithOidcPopup = (
     clientId: string,
     redirectUri: string,
     scope: string = 'openid profile email',
-): Promise<{ idToken: string; email?: string }> => {
+): Promise<{ idToken: string; email?: string; sub?: string }> => {
     return new Promise((resolve, reject) => {
         const nonce = crypto.randomUUID();
         const state = crypto.randomUUID();
@@ -844,13 +847,15 @@ export const signInWithOidcPopup = (
 
                     // Decode JWT to extract email claim (best-effort)
                     let email: string | undefined;
+                    let sub: string | undefined;
                     try {
                         const payload = JSON.parse(atob(idToken.split('.')[1]));
                         console.log("[DEBUG] ID Token Payload:", payload);
                         email = payload.email || payload.preferred_username || payload.upn;
+                        sub = payload.sub;
                     } catch { /* ignore decode errors */ }
 
-                    resolve({ idToken, email });
+                    resolve({ idToken, email, sub });
                 }
             } catch {
                 // Cross-origin error while popup is on the IdP domain — expected, ignore
@@ -1609,10 +1614,10 @@ export const getAgentIamPolicy = async (name: string, config: Config) => {
     return gapiRequest<any>(url, 'GET', config.projectId);
 };
 
-export const setAgentIamPolicy = async (name: string, policy: any, config: Config) => {
+export const setAgentIamPolicy = async (name: string, policy: any, config: Config, suppressErrorLog: boolean = false) => {
     const baseUrl = getDiscoveryEngineUrl(config.appLocation);
     const url = `${baseUrl}/${DISCOVERY_API_VERSION}/${name}:setIamPolicy`;
-    return gapiRequest<any>(url, 'POST', config.projectId, undefined, { policy });
+    return gapiRequest<any>(url, 'POST', config.projectId, undefined, { policy }, undefined, suppressErrorLog);
 };
 
 

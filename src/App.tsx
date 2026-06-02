@@ -38,7 +38,7 @@ function App() {
     }
   }, [darkMode]);
   const [projectNumber, setProjectNumber] = useState<string>('');
-  const [userProfile, setUserProfile] = useState<{ name: string, email: string, picture: string } | null>(() => {
+  const [userProfile, setUserProfile] = useState<{ name: string, email: string, picture: string, sub?: string } | null>(() => {
     const saved = sessionStorage.getItem('agentspace-userProfile');
     return saved ? JSON.parse(saved) : null;
   });
@@ -151,7 +151,7 @@ function App() {
       const redirectUri = wifConfig.redirectUri;
 
       console.log("Starting WiF sign in...");
-      const { idToken, email } = await api.signInWithOidcPopup(authorizationEndpoint, clientId, redirectUri);
+      const { idToken, email, sub } = await api.signInWithOidcPopup(authorizationEndpoint, clientId, redirectUri);
       console.log("Received ID Token from WiF, exchanging for STS token...");
 
       const wifConfigForExchange = {
@@ -183,7 +183,8 @@ function App() {
       const profile = {
         name: email?.split('@')[0] || 'WiF User',
         email: email || '',
-        picture: ''
+        picture: '',
+        sub: sub || ''
       };
       setUserProfile(profile);
       sessionStorage.setItem('agentspace-userProfile', JSON.stringify(profile));
@@ -316,6 +317,7 @@ function App() {
                 sessionStorage.setItem('agentspace-projectNumber', num);
               }} 
               userEmail={userProfile?.email || ''}
+              userSub={userProfile?.sub || ''}
               isSettingsOpen={isSettingsOpen}
               onCloseSettings={() => setIsSettingsOpen(false)}
               poolId={wifConfig.poolId}

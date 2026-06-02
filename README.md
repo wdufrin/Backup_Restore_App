@@ -48,25 +48,25 @@ To allow users logging in via Workforce Identity Federation to use the self-serv
 
 #### 1. Create Custom Role
 Create a custom role named `customBackupViewer` at the project level with the following permissions:
-- `discoveryengine.engines.list`
-- `discoveryengine.engines.get`
-- `discoveryengine.assistants.list`
-- `discoveryengine.assistants.get`
-- `discoveryengine.agents.list`
-- `discoveryengine.agents.get`
-- `discoveryengine.agents.manage` (Required for listing agents in v1alpha)
-- `discoveryengine.agents.getIamPolicy` (Required for ownership verification)
-- `discoveryengine.notebooks.list`
-- `discoveryengine.notebooks.get`
-- `serviceusage.services.use` (Required to call enabled APIs in the project)
+- **`discoveryengine.engines.list`** & **`discoveryengine.engines.get`**: To list and read search engine configurations in the environment.
+- **`discoveryengine.assistants.list`** & **`discoveryengine.assistants.get`**: To discover assistants and retrieve persona instructions or web search configs.
+- **`discoveryengine.agents.list`** & **`discoveryengine.agents.get`**: To list and extract full agent definitions (JSON configs) for backups.
+- **`discoveryengine.agents.getAgentView`**: To resolve exact agent type (`LOW_CODE`) and owner (`ownerUserPrincipal`) without guessing.
+- **`discoveryengine.agents.getIamPolicy`**: To read agent IAM policy bindings for ownership verification.
+- **`discoveryengine.agents.create`** & **`discoveryengine.agents.update`**: To create and restore agents in the target environment.
+- **`discoveryengine.agents.deploy`**: To deploy and publish migrated agents to the target environment.
+- **`discoveryengine.agents.manage`**: To manage assistant-level agent references under `v1alpha`.
+- **`discoveryengine.notebooks.list`** & **`discoveryengine.notebooks.get`**: To discover and extract notebooks and their cell contents.
+- **`discoveryengine.notebooks.create`**: To create/restore notebooks in the target project.
+- **`serviceusage.services.use`**: To allow your Workforce identity principal to make standard Discovery Engine API requests.
 
 You can create it using `gcloud`:
 ```bash
 gcloud iam roles create customBackupViewer \
     --project=ancient-sandbox-322523 \
     --title="Discovery Engine Custom Backup Viewer" \
-    --description="Read-only access to list engines, assistants, agents, and notebooks for backup purposes." \
-    --permissions="discoveryengine.engines.list,discoveryengine.engines.get,discoveryengine.assistants.list,discoveryengine.assistants.get,discoveryengine.agents.list,discoveryengine.agents.get,discoveryengine.agents.manage,discoveryengine.agents.getIamPolicy,discoveryengine.notebooks.list,discoveryengine.notebooks.get,serviceusage.services.use" \
+    --description="Least-privilege role required to discover, backup, migrate, and restore agents and notebooks." \
+    --permissions="discoveryengine.engines.list,discoveryengine.engines.get,discoveryengine.assistants.list,discoveryengine.assistants.get,discoveryengine.agents.list,discoveryengine.agents.get,discoveryengine.agents.getAgentView,discoveryengine.agents.getIamPolicy,discoveryengine.agents.create,discoveryengine.agents.update,discoveryengine.agents.deploy,discoveryengine.agents.manage,discoveryengine.notebooks.list,discoveryengine.notebooks.get,discoveryengine.notebooks.create,serviceusage.services.use" \
     --stage=GA
 ```
 

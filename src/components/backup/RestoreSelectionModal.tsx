@@ -24,6 +24,7 @@ export interface SelectableItem {
   disabled?: boolean;
   disabledReason?: string;
   targetId?: string; // Custom ID for restore
+  category?: 'core' | 'optional';
 }
 
 interface RestoreSelectionModalProps {
@@ -54,10 +55,9 @@ const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
   const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set());
   const [customIds, setCustomIds] = useState<Record<string, string>>({});
 
-  // When the modal opens with new items, select all of them by default (except disabled ones)
   useEffect(() => {
     if (isOpen) {
-      setSelectedNames(new Set(items.filter(item => !item.disabled).map(item => item.name)));
+      setSelectedNames(new Set(items.filter(item => !item.disabled && item.category !== 'optional').map(item => item.name)));
     }
   }, [isOpen, items]);
 
@@ -92,6 +92,52 @@ const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
   };
   
   const isAllSelected = selectedNames.size === items.length && items.length > 0;
+
+  const coreItems = items.filter(item => item.category !== 'optional');
+  const optionalItems = items.filter(item => item.category === 'optional');
+
+  const renderItem = (item: SelectableItem) => {
+    const itemId = item.name.split('/').pop() || item.name;
+    return (
+      <li key={item.name} className={`p-3 rounded-lg transition-colors ${item.disabled ? 'opacity-50 cursor-not-allowed bg-gray-50' : 'hover:bg-gray-50 border border-transparent hover:border-gray-200'}`}>
+        <label className={`flex items-center ${item.disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`} title={item.disabledReason}>
+          <input
+            type="checkbox"
+            checked={selectedNames.has(item.name)}
+            onChange={() => !item.disabled && handleToggle(item.name)}
+            disabled={item.disabled}
+            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+          />
+          <div className="ml-3 text-sm flex-grow">
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-gray-900">{item.displayName}</span>
+              {item.agentType && (
+                <span className={`ml-2 px-1.5 py-0.5 text-[10px] font-bold rounded-full uppercase tracking-wider ${item.disabled ? 'bg-gray-100 text-gray-400 border-gray-200' : 'bg-blue-100 text-blue-700 border border-blue-200'}`}>
+                  {item.agentType}
+                </span>
+              )}
+            </div>
+            <p className="text-gray-500 font-mono text-xs mt-0.5">{itemId}</p>
+            {showIdInput && !item.disabled && (
+              <div className="mt-1 flex items-center gap-2">
+                <span className="text-xs text-gray-500">Target ID:</span>
+                <input 
+                  type="text" 
+                  value={customIds[item.name] || ''} 
+                  onChange={(e) => setCustomIds(prev => ({ ...prev, [item.name]: e.target.value }))}
+                  placeholder="Auto-generate"
+                  className="bg-white border border-gray-300 rounded px-2 py-0.5 text-xs focus:ring-blue-500 focus:border-blue-500 w-32"
+                />
+              </div>
+            )}
+            {item.disabledReason && (
+              <p className="text-red-600 text-xs mt-1 font-medium">{item.disabledReason}</p>
+            )}
+          </div>
+        </label>
+      </li>
+    );
+  };
 
   if (!isOpen) {
     return null;
@@ -144,50 +190,32 @@ const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
             </div>
           </div>
           
-          <ul className="space-y-2 bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-            {items.map(item => {
-              const itemId = item.name.split('/').pop() || item.name;
-              return (
-                <li key={item.name} className={`p-3 rounded-lg transition-colors ${item.disabled ? 'opacity-50 cursor-not-allowed bg-gray-50' : 'hover:bg-gray-50 border border-transparent hover:border-gray-200'}`}>
-                  <label className={`flex items-center ${item.disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`} title={item.disabledReason}>
-                    <input
-                      type="checkbox"
-                      checked={selectedNames.has(item.name)}
-                      onChange={() => !item.disabled && handleToggle(item.name)}
-                      disabled={item.disabled}
-                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
-                    />
-                    <div className="ml-3 text-sm flex-grow">
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium text-gray-900">{item.displayName}</span>
-                        {item.agentType && (
-                          <span className={`ml-2 px-1.5 py-0.5 text-[10px] font-bold rounded-full uppercase tracking-wider ${item.disabled ? 'bg-gray-100 text-gray-400 border-gray-200' : 'bg-blue-100 text-blue-700 border border-blue-200'}`}>
-                            {item.agentType}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-gray-500 font-mono text-xs mt-0.5">{itemId}</p>
-                      {showIdInput && !item.disabled && (
-                        <div className="mt-1 flex items-center gap-2">
-                          <span className="text-xs text-gray-500">Target ID:</span>
-                          <input 
-                            type="text" 
-                            value={customIds[item.name] || ''} 
-                            onChange={(e) => setCustomIds(prev => ({ ...prev, [item.name]: e.target.value }))}
-                            placeholder="Auto-generate"
-                            className="bg-white border border-gray-300 rounded px-2 py-0.5 text-xs focus:ring-blue-500 focus:border-blue-500 w-32"
-                          />
-                        </div>
-                      )}
-                      {item.disabledReason && (
-                        <p className="text-red-600 text-xs mt-1 font-medium">{item.disabledReason}</p>
-                      )}
-                    </div>
-                  </label>
-                </li>
-              );
-            })}
-          </ul>
+          {optionalItems.length > 0 ? (
+            <div className="space-y-6">
+              {coreItems.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1 select-none">
+                    ⭐ Core Agents & Notebooks (Owned by you)
+                  </h3>
+                  <ul className="space-y-2 bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                    {coreItems.map(renderItem)}
+                  </ul>
+                </div>
+              )}
+              <div>
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1 select-none">
+                  ➕ Optional / Shared Agents (No explicit WIF owner)
+                </h3>
+                <ul className="space-y-2 bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                  {optionalItems.map(renderItem)}
+                </ul>
+              </div>
+            </div>
+          ) : (
+            <ul className="space-y-2 bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+              {items.map(renderItem)}
+            </ul>
+          )}
         </div>
 
         <footer className="p-6 border-t border-gray-100 flex justify-end space-x-3 bg-white rounded-b-2xl">

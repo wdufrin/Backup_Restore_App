@@ -37,6 +37,7 @@ interface BackupPageProps {
   projectNumber: string;
   setProjectNumber: (projectNumber: string) => void;
   userEmail: string;
+  userSub: string;
   isSettingsOpen?: boolean;
   onCloseSettings?: () => void;
   poolId?: string;
@@ -103,12 +104,57 @@ const getOwnerFromBinding = (member: string): string => {
   }
 };
 
+const isAgentOwnedByUser = (agent: any, userEmail: string, userSub: string, poolId?: string): boolean => {
+  let owner = "N/A";
+  let fullMember = "";
+  if (agent.iamPolicy && agent.iamPolicy.bindings) {
+    const ownerBinding = agent.iamPolicy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
+    if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
+      fullMember = ownerBinding.members[0];
+      owner = getOwnerFromBinding(fullMember);
+    }
+  }
+  
+  // 1. Match by direct email
+  if (owner === userEmail) return true;
+  
+  // 2. Match by WIF subject ID if available
+  if (userSub && owner === userSub) return true;
+  
+  // 3. Match by full WIF principal format
+  if (poolId && userSub) {
+    const wifPrincipal = `principal://iam.googleapis.com/locations/global/workforcePools/${poolId}/subject/${userSub}`;
+    if (fullMember === wifPrincipal) return true;
+  }
 
+  // 4. Check low-code agent definition owner
+  const definitionKeys = Object.keys(agent).filter(key => key.toLowerCase().includes('agentdefinition'));
+  for (const key of definitionKeys) {
+    const definition = (agent as any)[key];
+    if (definition && definition.owner) {
+      if (definition.owner === userEmail) return true;
+      if (userSub && definition.owner === userSub) return true;
+      if (poolId && userSub) {
+        const wifPrincipal = `principal://iam.googleapis.com/locations/global/workforcePools/${poolId}/subject/${userSub}`;
+        if (definition.owner === wifPrincipal) return true;
+      }
+      // Google gaia hex ID check
+      let userGaiaIdHex = "";
+      try {
+        if (userSub && /^\d+$/.test(userSub)) {
+          userGaiaIdHex = `gaia:0x${BigInt(userSub).toString(16)}#`;
+          if (definition.owner === userGaiaIdHex) return true;
+        }
+      } catch {}
+    }
+  }
 
+  return false;
+};
 
 // --- Main Page Component ---
 
-const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targetToken, onGoogleSignIn, onWifSignIn, onSignOut, projectNumber, setProjectNumber, userEmail, isSettingsOpen, onCloseSettings, poolId }) => {
+const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targetToken, onGoogleSignIn, onWifSignIn, onSignOut, projectNumber, setProjectNumber, userEmail, userSub, isSettingsOpen, onCloseSettings, poolId }) => {
   const [config, setConfig] = useState({
     appLocation: 'global',
     appId: '',
@@ -119,7 +165,18 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
   });
   const isAdminModeEnabled = import.meta.env.VITE_ENABLE_ADMIN_MODE === 'true';
   const [activeTab, setActiveTab] = useState<'admin' | 'user'>(isAdminModeEnabled ? 'admin' : 'user');
-  const [userTabConfig, setUserTabConfig] = useState(() => {
+  interface UserTabConfig {
+    sourceProject: string;
+    sourceLocation: string;
+    sourceAppId: string;
+    targetProject: string;
+    targetLocation: string;
+    targetAppId: string;
+    targetAppUrl: string;
+    bypassOwnerFilter?: boolean;
+  }
+
+  const [userTabConfig, setUserTabConfig] = useState<UserTabConfig>(() => {
     const saved = localStorage.getItem('agentspace-userTabConfig');
     return saved ? JSON.parse(saved) : {
       sourceProject: import.meta.env.VITE_SOURCE_PROJECT || '',
@@ -129,6 +186,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
       targetLocation: import.meta.env.VITE_TARGET_LOCATION || 'global',
       targetAppId: import.meta.env.VITE_TARGET_APP_ID || '',
       targetAppUrl: import.meta.env.VITE_TARGET_APP_URL || '',
+      bypassOwnerFilter: import.meta.env.VITE_BYPASS_OWNER_FILTER === 'true',
     };
   });
   const [isUserConfigModalOpen, setIsUserConfigModalOpen] = useState(false);
@@ -139,6 +197,8 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
   const [isLoadingSourceDatastores, setIsLoadingSourceDatastores] = useState(false);
   const [isLoadingTargetDatastores, setIsLoadingTargetDatastores] = useState(false);
   const [datastoreMapping, setDatastoreMapping] = useState<Record<string, string>>(() => {
+    const saved = localStorage.getItem('agentspace-datastoreMapping');
+    if (saved) return JSON.parse(saved);
     const envMapping = import.meta.env.VITE_DATASTORE_MAPPING;
     try {
       return envMapping ? JSON.parse(envMapping) : {};
@@ -150,6 +210,8 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
   const [sourceCollections, setSourceCollections] = useState<any[]>([]);
   const [targetCollections, setTargetCollections] = useState<any[]>([]);
   const [collectionMapping, setCollectionMapping] = useState<Record<string, string>>(() => {
+    const saved = localStorage.getItem('agentspace-collectionMapping');
+    if (saved) return JSON.parse(saved);
     const envMapping = import.meta.env.VITE_COLLECTION_MAPPING;
     try {
       return envMapping ? JSON.parse(envMapping) : {};
@@ -158,8 +220,14 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
       return {};
     }
   });
-  const [shouldMigrateAgents, setShouldMigrateAgents] = useState(import.meta.env.VITE_MIGRATE_AGENTS !== 'false');
-  const [shouldMigrateNotebooks, setShouldMigrateNotebooks] = useState(import.meta.env.VITE_MIGRATE_NOTEBOOKS !== 'false');
+  const [shouldMigrateAgents, setShouldMigrateAgents] = useState(() => {
+    const saved = localStorage.getItem('agentspace-shouldMigrateAgents');
+    return saved ? saved === 'true' : import.meta.env.VITE_MIGRATE_AGENTS !== 'false';
+  });
+  const [shouldMigrateNotebooks, setShouldMigrateNotebooks] = useState(() => {
+    const saved = localStorage.getItem('agentspace-shouldMigrateNotebooks');
+    return saved ? saved === 'true' : import.meta.env.VITE_MIGRATE_NOTEBOOKS !== 'false';
+  });
   const [isStep1Complete, setIsStep1Complete] = useState<boolean>(() => {
     const saved = localStorage.getItem('agentspace-step1Complete');
     return saved === 'true';
@@ -170,21 +238,29 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
     localStorage.setItem('agentspace-step1Complete', String(isStep1Complete));
   }, [isStep1Complete]);
 
-  const [featureFlags, setFeatureFlags] = useState({
-    idpChangeEnabled: import.meta.env.VITE_IDP_CHANGE_ENABLED === 'true',
-    enableGoogleIdp: import.meta.env.VITE_ENABLE_GOOGLE_IDP !== 'false',
-    enableWifIdp: import.meta.env.VITE_ENABLE_WIF_IDP === 'true',
+  const [featureFlags, setFeatureFlags] = useState(() => {
+    const saved = localStorage.getItem('agentspace-featureFlags');
+    return saved ? JSON.parse(saved) : {
+      idpChangeEnabled: import.meta.env.VITE_IDP_CHANGE_ENABLED === 'true',
+      enableGoogleIdp: import.meta.env.VITE_ENABLE_GOOGLE_IDP !== 'false',
+      enableWifIdp: import.meta.env.VITE_ENABLE_WIF_IDP === 'true',
+    };
   });
 
-  const [googleClientId, setGoogleClientId] = useState(import.meta.env.VITE_GOOGLE_CLIENT_ID || '');
+  const [googleClientId, setGoogleClientId] = useState(() => {
+    return localStorage.getItem('agentspace-googleClientId') || import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+  });
 
-  const [wifConfigState, setWifConfigState] = useState({
-    userProject: import.meta.env.VITE_WIF_USER_PROJECT || '',
-    poolId: import.meta.env.VITE_WIF_POOL_ID || '',
-    providerId: import.meta.env.VITE_WIF_PROVIDER_ID || '',
-    clientId: import.meta.env.VITE_WIF_CLIENT_ID || '',
-    authEndpoint: import.meta.env.VITE_WIF_AUTH_ENDPOINT || '',
-    redirectUri: import.meta.env.VITE_WIF_REDIRECT_URI || '',
+  const [wifConfigState, setWifConfigState] = useState(() => {
+    const saved = localStorage.getItem('agentspace-wifConfig');
+    return saved ? JSON.parse(saved) : {
+      userProject: import.meta.env.VITE_WIF_USER_PROJECT || '',
+      poolId: import.meta.env.VITE_WIF_POOL_ID || '',
+      providerId: import.meta.env.VITE_WIF_PROVIDER_ID || '',
+      clientId: import.meta.env.VITE_WIF_CLIENT_ID || '',
+      authEndpoint: import.meta.env.VITE_WIF_AUTH_ENDPOINT || '',
+      redirectUri: import.meta.env.VITE_WIF_REDIRECT_URI || '',
+    };
   });
 
   useEffect(() => {
@@ -266,14 +342,27 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
     content += `VITE_SOURCE_PROJECT=${userTabConfig.sourceProject}\n`;
     content += `VITE_SOURCE_LOCATION=${userTabConfig.sourceLocation}\n`;
     content += `VITE_SOURCE_APP_ID=${userTabConfig.sourceAppId}\n`;
-    content += `VITE_SOURCE_IDP=${import.meta.env.VITE_SOURCE_IDP || 'Google'}\n\n`;
+    content += `VITE_BYPASS_OWNER_FILTER=${userTabConfig.bypassOwnerFilter || false}\n`;
+    
+    const sourceIdpVal = import.meta.env.VITE_SOURCE_IDP || 'Google';
+    if (featureFlags.idpChangeEnabled) {
+      content += `VITE_SOURCE_IDP=${sourceIdpVal}\n\n`;
+    } else {
+      content += `#VITE_SOURCE_IDP=${sourceIdpVal}\n\n`;
+    }
 
     content += `# --- Target Environment ---\n`;
     content += `VITE_TARGET_PROJECT=${userTabConfig.targetProject}\n`;
     content += `VITE_TARGET_LOCATION=${userTabConfig.targetLocation}\n`;
     content += `VITE_TARGET_APP_ID=${userTabConfig.targetAppId}\n`;
     content += `VITE_TARGET_APP_URL=${userTabConfig.targetAppUrl}\n`;
-    content += `VITE_TARGET_IDP=${import.meta.env.VITE_TARGET_IDP || 'WiF'}\n\n`;
+    
+    const targetIdpVal = import.meta.env.VITE_TARGET_IDP || 'WiF';
+    if (featureFlags.idpChangeEnabled) {
+      content += `VITE_TARGET_IDP=${targetIdpVal}\n\n`;
+    } else {
+      content += `#VITE_TARGET_IDP=${targetIdpVal}\n\n`;
+    }
 
     content += `# --- Workforce Identity Federation (WIF) / Entra ID Config ---\n`;
     content += `VITE_WIF_USER_PROJECT=${wifConfigState.userProject}\n`;
@@ -359,6 +448,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
             targetLocation: config.VITE_TARGET_LOCATION || 'global',
             targetAppId: config.VITE_TARGET_APP_ID || '',
             targetAppUrl: config.VITE_TARGET_APP_URL || '',
+            bypassOwnerFilter: config.VITE_BYPASS_OWNER_FILTER === 'true',
           };
           setUserTabConfig(newUserTabConfig);
 
@@ -419,11 +509,25 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
 
   const handleSaveAdminConfig = () => {
     localStorage.setItem('agentspace-userTabConfig', JSON.stringify(userTabConfig));
+    localStorage.setItem('agentspace-featureFlags', JSON.stringify(featureFlags));
+    localStorage.setItem('agentspace-googleClientId', googleClientId);
+    localStorage.setItem('agentspace-wifConfig', JSON.stringify(wifConfigState));
+    localStorage.setItem('agentspace-shouldMigrateAgents', String(shouldMigrateAgents));
+    localStorage.setItem('agentspace-shouldMigrateNotebooks', String(shouldMigrateNotebooks));
+    localStorage.setItem('agentspace-datastoreMapping', JSON.stringify(datastoreMapping));
+    localStorage.setItem('agentspace-collectionMapping', JSON.stringify(collectionMapping));
     addLog(`Admin configuration saved to browser storage.`);
   };
 
   const handleResetAdminConfig = () => {
     localStorage.removeItem('agentspace-userTabConfig');
+    localStorage.removeItem('agentspace-featureFlags');
+    localStorage.removeItem('agentspace-googleClientId');
+    localStorage.removeItem('agentspace-wifConfig');
+    localStorage.removeItem('agentspace-shouldMigrateAgents');
+    localStorage.removeItem('agentspace-shouldMigrateNotebooks');
+    localStorage.removeItem('agentspace-datastoreMapping');
+    localStorage.removeItem('agentspace-collectionMapping');
     setUserTabConfig({
       sourceProject: import.meta.env.VITE_SOURCE_PROJECT || '',
       sourceLocation: import.meta.env.VITE_SOURCE_LOCATION || 'global',
@@ -433,6 +537,36 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
       targetAppId: import.meta.env.VITE_TARGET_APP_ID || '',
       targetAppUrl: import.meta.env.VITE_TARGET_APP_URL || '',
     });
+    setFeatureFlags({
+      idpChangeEnabled: import.meta.env.VITE_IDP_CHANGE_ENABLED === 'true',
+      enableGoogleIdp: import.meta.env.VITE_ENABLE_GOOGLE_IDP !== 'false',
+      enableWifIdp: import.meta.env.VITE_ENABLE_WIF_IDP === 'true',
+    });
+    setGoogleClientId(import.meta.env.VITE_GOOGLE_CLIENT_ID || '');
+    setWifConfigState({
+      userProject: import.meta.env.VITE_WIF_USER_PROJECT || '',
+      poolId: import.meta.env.VITE_WIF_POOL_ID || '',
+      providerId: import.meta.env.VITE_WIF_PROVIDER_ID || '',
+      clientId: import.meta.env.VITE_WIF_CLIENT_ID || '',
+      authEndpoint: import.meta.env.VITE_WIF_AUTH_ENDPOINT || '',
+      redirectUri: import.meta.env.VITE_WIF_REDIRECT_URI || '',
+    });
+    setShouldMigrateAgents(import.meta.env.VITE_MIGRATE_AGENTS !== 'false');
+    setShouldMigrateNotebooks(import.meta.env.VITE_MIGRATE_NOTEBOOKS !== 'false');
+
+    const envDsMapping = import.meta.env.VITE_DATASTORE_MAPPING;
+    try {
+      setDatastoreMapping(envDsMapping ? JSON.parse(envDsMapping) : {});
+    } catch (e) {
+      setDatastoreMapping({});
+    }
+
+    const envCollMapping = import.meta.env.VITE_COLLECTION_MAPPING;
+    try {
+      setCollectionMapping(envCollMapping ? JSON.parse(envCollMapping) : {});
+    } catch (e) {
+      setCollectionMapping({});
+    }
     addLog(`Admin configuration reset to environment defaults.`);
   };
 
@@ -471,11 +605,12 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
   const [expandedNotebookIdx, setExpandedNotebookIdx] = useState<number | null>(null);
   const [showRawJsonIdx, setShowRawJsonIdx] = useState<number | null>(null);
 
+
   const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
   const [selectionModalItems, setSelectionModalItems] = useState<SelectableItem[]>([]);
   const [selectionModalTitle, setSelectionModalTitle] = useState('');
   const [selectionModalSubtitle, setSelectionModalSubtitle] = useState('');
-  const [selectionModalAction, setSelectionModalAction] = useState<'backup' | 'restore'>('backup');
+  const [selectionModalAction, setSelectionModalAction] = useState<'backup' | 'restore' | 'migrate'>('backup');
   const [pendingBackupData, setPendingBackupData] = useState<any>(null);
   const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set());
 
@@ -1070,17 +1205,12 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
     
     let agentsToSave = agents;
     if (activeTab === 'user') {
-      agentsToSave = agents.filter((agent: any) => {
-        let owner = "N/A";
-        if (agent.iamPolicy && agent.iamPolicy.bindings) {
-          const ownerBinding = agent.iamPolicy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
-          if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
-            owner = getOwnerFromBinding(ownerBinding.members[0]);
-          }
-        }
-        return owner === userEmail;
-      });
-      addLog(`  - User Tab: Filtered down to ${agentsToSave.length} agents owned by you.`);
+      if (userTabConfig.bypassOwnerFilter) {
+        addLog(`  - User Tab: Bypassing WIF owner filtering (migrating all agents in the selected app context).`);
+      } else {
+        agentsToSave = agents.filter((agent: any) => isAgentOwnedByUser(agent, userEmail, userSub, poolId));
+        addLog(`  - User Tab: Filtered down to ${agentsToSave.length} agents owned by you.`);
+      }
     }
     
     const backupData = { type: 'Agents', createdAt: new Date().toISOString(), sourceConfig: apiConfig, agents: agentsToSave };
@@ -1142,17 +1272,23 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
     addLog(`Starting combined backup for user: ${userEmail}...`);
     
     let userGaiaIdHex = "";
-    try {
-      const userInfo = await api.getUserInfo(accessToken);
-      if (userInfo && userInfo.sub) {
-        // Convert decimal sub to hex and format as gaia:0x...#
-        userGaiaIdHex = `gaia:0x${BigInt(userInfo.sub).toString(16)}#`;
-        if (isDebugMode) {
-          addLog(`[DEBUG] Resolved User GAIA ID: ${userGaiaIdHex}`);
-        }
+    if (userSub && /^\d+$/.test(userSub)) {
+      userGaiaIdHex = `gaia:0x${BigInt(userSub).toString(16)}#`;
+      if (isDebugMode) {
+        addLog(`[DEBUG] Resolved User GAIA ID from userSub prop: ${userGaiaIdHex}`);
       }
-    } catch (err: any) {
-      addLog(`Warning: Failed to fetch user info for GAIA ID filtering: ${err.message}`);
+    } else if (!poolId) {
+      try {
+        const userInfo = await api.getUserInfo(accessToken);
+        if (userInfo && userInfo.sub && /^\d+$/.test(userInfo.sub)) {
+          userGaiaIdHex = `gaia:0x${BigInt(userInfo.sub).toString(16)}#`;
+          if (isDebugMode) {
+            addLog(`[DEBUG] Resolved User GAIA ID from Google userinfo: ${userGaiaIdHex}`);
+          }
+        }
+      } catch (err: any) {
+        addLog(`Warning: Failed to fetch user info for GAIA ID filtering: ${err.message}`);
+      }
     }
     
     const sourceConfig = {
@@ -1176,51 +1312,24 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
       pageToken = agentsResponse.nextPageToken;
     } while (pageToken);
 
-    // Fetch IAM policies and filter
+    // Fetch IAM policies and categorize
     const userAgents = [];
     for (const agent of agents) {
       try {
         const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
-        let owner = "N/A";
-        if (policy && policy.bindings) {
-          const ownerBinding = policy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
-          if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
-            owner = getOwnerFromBinding(ownerBinding.members[0]);
-          }
-        }
-        
-        let isOwner = false;
-        if (owner === userEmail) {
-          isOwner = true;
-        }
-
-        // Extra check for low-code agents if GAIA ID is available
-        if (userGaiaIdHex) {
-          const definitionKeys = Object.keys(agent).filter(key => key.toLowerCase().includes('agentdefinition'));
-          for (const key of definitionKeys) {
-            const definition = (agent as any)[key];
-            if (definition && definition.owner) {
-              if (definition.owner === userGaiaIdHex) {
-                isOwner = true; // Confirmed owner!
-              } else {
-                isOwner = false; // Overwrite IAM policy if JSON owner doesn't match!
-              }
-              break;
-            }
-          }
-        }
-
-        if (isOwner) {
-          (agent as any).iamPolicy = policy;
-          userAgents.push(agent);
-        }
+        const agentWithPolicy = { ...agent, iamPolicy: policy };
+        const isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId);
+        (agentWithPolicy as any).category = isOwned ? 'core' : 'optional';
+        userAgents.push(agentWithPolicy);
       } catch (e) {
         addLog(`  - Warning: Failed to backup IAM policy for agent ${agent.name}: ${(e as any).message}`);
+        (agent as any).category = 'optional';
+        userAgents.push(agent);
       }
     }
-    addLog(`Found ${userAgents.length} agents owned by you.`);
+    addLog(`Found ${userAgents.length} agents in selected engine.`);
     if (isDebugMode) {
-      addLog(`[DEBUG] Owned Agents: ${JSON.stringify(userAgents.map(a => a.displayName), null, 2)}`);
+      addLog(`[DEBUG] Agents: ${JSON.stringify(userAgents.map(a => `${a.displayName} (${(a as any).category})`), null, 2)}`);
     }
 
     // 2. Backup Notebooks
@@ -1271,7 +1380,8 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
     const agentItems: SelectableItem[] = userAgents.map(agent => ({
       name: agent.name,
       displayName: agent.displayName || 'Unnamed Agent',
-      agentType: 'Agent'
+      agentType: 'Agent',
+      category: (agent as any).category
     }));
 
     const notebookItems: SelectableItem[] = userNotebooks.map(nb => ({
@@ -1287,6 +1397,8 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
     setPendingBackupData(backupData);
     setIsSelectionModalOpen(true);
   });
+
+
 
   const handleSingleClickMigration = async () => executeOperation('MigrateUserData', async () => {
     const sourceIdp = import.meta.env.VITE_SOURCE_IDP || 'Google';
@@ -1311,13 +1423,23 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
     addLog(`Starting single-click migration...`);
     
     let userGaiaIdHex = "";
-    try {
-      const userInfo = await api.getUserInfo(accessToken);
-      if (userInfo && userInfo.sub) {
-        userGaiaIdHex = `gaia:0x${BigInt(userInfo.sub).toString(16)}#`;
+    if (userSub && /^\d+$/.test(userSub)) {
+      userGaiaIdHex = `gaia:0x${BigInt(userSub).toString(16)}#`;
+      if (isDebugMode) {
+        addLog(`[DEBUG] Resolved User GAIA ID from userSub prop: ${userGaiaIdHex}`);
       }
-    } catch (err: any) {
-      addLog(`Warning: Failed to fetch user info for GAIA ID filtering: ${err.message}`);
+    } else if (!poolId) {
+      try {
+        const userInfo = await api.getUserInfo(accessToken);
+        if (userInfo && userInfo.sub && /^\d+$/.test(userInfo.sub)) {
+          userGaiaIdHex = `gaia:0x${BigInt(userInfo.sub).toString(16)}#`;
+          if (isDebugMode) {
+            addLog(`[DEBUG] Resolved User GAIA ID from Google userinfo: ${userGaiaIdHex}`);
+          }
+        }
+      } catch (err: any) {
+        addLog(`Warning: Failed to fetch user info for GAIA ID filtering: ${err.message}`);
+      }
     }
     
     const sourceConfig = {
@@ -1328,6 +1450,11 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
       accessToken: sourceToken || accessToken,
     };
 
+    if (isDebugMode) {
+      addLog(`[DEBUG] Exchanged WIF Access Token (for terminal curls):`);
+      addLog(sourceConfig.accessToken || "Token not resolved");
+    }
+
     addLog(`Fetching agents from ${sourceConfig.appId}...`);
     const agents: Agent[] = [];
     let pageToken: string | undefined = undefined;
@@ -1337,227 +1464,191 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
       pageToken = agentsResponse.nextPageToken;
     } while (pageToken);
 
-    const userAgents = [];
+    const fullBackupAgents: any[] = [];
+    const selectableAgents: any[] = [];
+
+    addLog(`Fetching and analyzing agents via Agent View...`);
     for (const agent of agents) {
       try {
-        const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
-        let owner = "N/A";
-        if (policy && policy.bindings) {
-          const ownerBinding = policy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
-          if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
-            owner = getOwnerFromBinding(ownerBinding.members[0]);
+        // 1. Fetch Agent View for exact type and owner details
+        const rawResponse = await api.getAgentView(agent.name, sourceConfig);
+        const agentView = rawResponse?.agentView || rawResponse;
+        
+        if (isDebugMode) {
+          addLog(`[DEBUG] Agent View for ${agent.displayName}: ${JSON.stringify(rawResponse, null, 2)}`);
+        }
+
+        const rawAgentType = agentView?.agentType;
+        
+        // Skip if it is explicitly ADK or A2A or not LOW_CODE
+        if (rawAgentType && rawAgentType !== 'LOW_CODE' && rawAgentType !== 'Low Code') {
+          if (isDebugMode) {
+            addLog(`[DEBUG] Skipping non-low-code agent ${agent.displayName || agent.name} (Type: ${rawAgentType}) from migration.`);
+          }
+          continue;
+        }
+
+        // If rawAgentType is missing, perform structural fallback check
+        if (!rawAgentType && (agent.adkAgentDefinition || agent.a2aAgentDefinition)) {
+          if (isDebugMode) {
+            addLog(`[DEBUG] Structural Fallback: Skipping non-low-code agent ${agent.displayName || agent.name} from migration.`);
+          }
+          continue;
+        }
+
+        // 2. Resolve Owner
+        const agentOwner = agentView?.ownerUserPrincipal || agentView?.ownerDisplayName || agentView?.agentOwner || agentView?.owner;
+        let isOwned = false;
+        let hasOwner = false;
+
+        if (agentOwner) {
+          hasOwner = true;
+          isOwned = agentOwner.toLowerCase().includes(userEmail.toLowerCase()) || 
+                    (userSub && agentOwner.includes(userSub));
+        } else {
+          // Fallback to IAM policy if owner is not present in agentView
+          try {
+            const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
+            if (policy && policy.bindings) {
+              const ownerBinding = policy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
+              if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
+                hasOwner = true;
+                const firstMember = ownerBinding.members[0];
+                isOwned = firstMember.toLowerCase().includes(userEmail.toLowerCase()) ||
+                          (userSub && firstMember.includes(userSub)) ||
+                          (poolId && firstMember.includes(poolId));
+              }
+            }
+          } catch (policyErr) {
+            // If we can't get IAM policy either, default to unowned (hasOwner = false)
           }
         }
-        
-        let isOwner = owner === userEmail;
 
-        if (userGaiaIdHex) {
-          const definitionKeys = Object.keys(agent).filter(key => key.toLowerCase().includes('agentdefinition'));
-          for (const key of definitionKeys) {
-            const definition = (agent as any)[key];
-            if (definition && definition.owner) {
-              if (definition.owner === userGaiaIdHex) isOwner = true;
-              else isOwner = false;
-              break;
+        const enrichedAgent = { 
+          ...agent, 
+          agentType: 'Low Code',
+          iamPolicy: agentView?.iamPolicy
+        };
+        fullBackupAgents.push(enrichedAgent);
+
+        // Only show WIF user-owned agents OR shared/unowned agents (no explicit owner)
+        if (isOwned || !hasOwner) {
+          selectableAgents.push({
+            name: agent.name,
+            displayName: agent.displayName,
+            agentType: 'Low Code',
+            category: isOwned ? 'core' : 'optional'
+          });
+        }
+      } catch (e: any) {
+        addLog(`  - Warning: Failed to fetch Agent View for agent ${agent.displayName}: ${e.message}`);
+        
+        // Fallback: If getAgentView fails (e.g. due to workforce pool permission issues),
+        // perform structural detection to filter out ADK/A2A, and check ownership via IAM policy.
+        
+        // 1. Structural Type Check
+        let agentType = "Low Code";
+        if (agent.adkAgentDefinition) agentType = "ADK";
+        else if (agent.a2aAgentDefinition) agentType = "A2A";
+
+        if (agentType !== 'Low Code') {
+          if (isDebugMode) {
+            addLog(`[DEBUG] Fallback: Skipping non-low-code agent ${agent.displayName || agent.name} (Type: ${agentType}) from migration.`);
+          }
+          continue;
+        }
+
+        // 2. IAM Policy Owner Check
+        let isOwned = false;
+        let hasOwner = false;
+        try {
+          const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
+          const agentWithPolicy = { ...agent, iamPolicy: policy };
+          
+          isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId);
+          
+          if (policy && policy.bindings) {
+            const ownerBinding = policy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
+            if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
+              hasOwner = true;
             }
           }
+          
+          fullBackupAgents.push(agentWithPolicy);
+        } catch (policyErr: any) {
+          addLog(`    - Warning: Failed to fetch IAM policy for fallback: ${policyErr.message}`);
+          // Default to treating as unowned/shared if both APIs fail
+          fullBackupAgents.push(agent);
         }
 
-        if (isOwner) {
-          (agent as any).iamPolicy = policy;
-          userAgents.push(agent);
+        // Only show WIF user-owned agents OR shared/unowned agents (no explicit owner)
+        if (isOwned || !hasOwner) {
+          selectableAgents.push({
+            name: agent.name,
+            displayName: agent.displayName,
+            agentType: 'Low Code',
+            category: isOwned ? 'core' : 'optional'
+          });
         }
-      } catch (e) {
-        addLog(`  - Warning: Failed to backup IAM policy for agent ${agent.name}: ${(e as any).message}`);
       }
     }
 
     addLog(`Fetching notebooks...`);
     const response = await api.listNotebooks(sourceConfig);
     const notebooks = response.notebooks || [];
-    const userNotebooks = [];
+    const fullBackupNotebooks: any[] = [];
+    const selectableNotebooks: any[] = [];
 
     for (const nb of notebooks) {
       const notebookId = nb.name.split('/').pop()!;
       try {
         const rawNotebook = await api.getNotebook(sourceConfig, notebookId);
-        if (rawNotebook.metadata?.userRole === 'PROJECT_ROLE_OWNER') {
-          const fullSources = [];
-          for (const source of (rawNotebook.sources || [])) {
-            const sourceId = source.name.split('/').pop()!;
-            try {
-              const fullSource = await api.getNotebookSource(sourceConfig, notebookId, sourceId);
-              fullSources.push(fullSource);
-            } catch (sourceErr: any) {
-              fullSources.push(source);
-            }
+        const fullSources = [];
+        for (const source of (rawNotebook.sources || [])) {
+          const sourceId = source.name.split('/').pop()!;
+          try {
+            const fullSource = await api.getNotebookSource(sourceConfig, notebookId, sourceId);
+            fullSources.push(fullSource);
+          } catch (sourceErr: any) {
+            fullSources.push(source);
           }
-          rawNotebook.sources = fullSources;
-          userNotebooks.push(rawNotebook);
         }
+        rawNotebook.sources = fullSources;
+        fullBackupNotebooks.push(rawNotebook);
+
+        const isOwned = rawNotebook.metadata?.userRole === 'PROJECT_ROLE_OWNER';
+        selectableNotebooks.push({
+          name: rawNotebook.name,
+          displayName: rawNotebook.displayName || rawNotebook.title || rawNotebook.name.split('/').pop() || 'Unnamed Notebook',
+          agentType: 'Notebook',
+          category: isOwned ? 'core' : 'optional'
+        });
       } catch (nbErr: any) {
         addLog(`  - Error fetching details for notebook ${notebookId}: ${nbErr.message}`);
       }
-      await delay(500);
+      await delay(300);
     }
 
-    const targetConfig = {
-      ...apiConfig,
-      projectId: userTabConfig.targetProject,
-      appLocation: userTabConfig.targetLocation || apiConfig.appLocation,
-      appId: userTabConfig.targetAppId || apiConfig.appId,
-      accessToken: targetToken || accessToken,
-    };
+    if (selectableAgents.length === 0 && selectableNotebooks.length === 0) {
+      addLog("No agents or notebooks auto-detected for migration.");
+      return;
+    }
 
-    addLog(`Starting restore to target environment...`);
+    // Save state for the interactive confirmation popup
+    setPendingBackupData({
+      agents: fullBackupAgents,
+      notebooks: fullBackupNotebooks,
+      sourceConfig,
+      userEmail
+    });
+
+    setSelectionModalItems([...selectableAgents, ...selectableNotebooks]);
+    setSelectionModalTitle('Confirm Items to Migrate');
+    setSelectionModalSubtitle('Please review the auto-detected items. Under "Optional / Shared Agents", we listed agents that have no specific owner assigned to them—select any you wish to include.');
+    setSelectionModalAction('migrate');
+    setIsSelectionModalOpen(true);
     
-    if (shouldMigrateAgents && userAgents.length > 0) {
-      addLog(`Restoring ${userAgents.length} agents to ${targetConfig.appId}...`);
-      await restoreAgentsIntoAssistant(userAgents, targetConfig, sourceConfig);
-    }
-
-    const report: ManualActionReportItem[] = [];
-
-    if (shouldMigrateAgents && userAgents.length > 0) {
-      for (const agent of userAgents) {
-        const dataStoreConnections = (agent as any).dataStoreConnections;
-        const iamPolicy = (agent as any).iamPolicy;
-        
-        const sharedWith: string[] = [];
-        
-        if (iamPolicy && iamPolicy.bindings) {
-          for (const binding of iamPolicy.bindings) {
-            if (binding.role === 'roles/discoveryengine.agentOwner') continue;
-            if (binding.members) {
-              const filteredMembers = binding.members.filter((member: string) => !userEmail || !member.includes(userEmail));
-              sharedWith.push(...filteredMembers);
-            }
-          }
-        }
-
-        const unmappedDatastores: string[] = [];
-        const knowledgeAttachments: string[] = [];
-        if (dataStoreConnections && dataStoreConnections.length > 0) {
-          for (const conn of dataStoreConnections) {
-            if (conn.dataStore) {
-              const oldDsId = conn.dataStore.split('/').pop();
-              if (oldDsId) {
-                knowledgeAttachments.push(oldDsId);
-                if (!datastoreMapping[oldDsId]) {
-                  unmappedDatastores.push(oldDsId);
-                }
-              }
-            }
-          }
-        }
-
-        const agentFiles: string[] = [];
-        const definitionKeys = Object.keys(agent).filter(key => key.toLowerCase().includes('agentdefinition'));
-        
-        for (const key of definitionKeys) {
-          const definition = (agent as any)[key];
-          if (definition) {
-            const files = definition.deployedAgentFiles || definition.agentFiles;
-            if (files && files.length > 0) {
-              for (const file of files) {
-                if (file.fileName) {
-                  agentFiles.push(file.fileName);
-                }
-              }
-            }
-          }
-        }
-        
-        report.push({
-          agentName: agent.displayName,
-          sharedWith: Array.from(new Set(sharedWith)),
-          unmappedDatastores: unmappedDatastores,
-          knowledgeAttachments: knowledgeAttachments,
-          agentFiles: agentFiles,
-        });
-      }
-    }
-
-    if (shouldMigrateNotebooks && userNotebooks.length > 0) {
-      addLog(`Restoring ${userNotebooks.length} notebooks to ${targetConfig.appId}...`);
-      
-      let existingNotebooks: any[] = [];
-      try {
-        const listResponse = await api.listNotebooks(targetConfig);
-        existingNotebooks = listResponse.notebooks || [];
-      } catch (listErr: any) {
-        addLog(`Warning: Could not list existing notebooks in target: ${listErr.message}`);
-      }
-
-      for (const nb of userNotebooks) {
-        const targetTitle = `${nb.title || 'Restored Notebook'} (Restored)`;
-        
-        const alreadyExists = existingNotebooks.some((n: any) => n.title === targetTitle);
-        if (alreadyExists) {
-          addLog(`  - Skipping notebook "${nb.title}" (already restored)`);
-          continue;
-        }
-
-        try {
-          const payload = {
-            title: targetTitle,
-            metadata: nb.metadata
-          };
-          const newNotebook = await api.createNotebook(targetConfig, payload);
-          const newNotebookId = newNotebook.name.split('/').pop()!;
-          addLog(`  - Created Notebook: ${newNotebookId}`);
-
-          if (nb.sources && nb.sources.length > 0) {
-            const sourceRequests = nb.sources.filter(isRestorableSource).map(mapSourceToPayload);
-            if (sourceRequests.length > 0) {
-              try {
-                addLog(`    - Adding ${sourceRequests.length} sources to notebook...`);
-                await api.batchCreateNotebookSources(targetConfig, newNotebookId, sourceRequests);
-                addLog(`    - Sources added.`);
-              } catch (srcErr: any) {
-                addLog(`    - Error adding sources: ${srcErr.message}`);
-              }
-            }
-          }
-          
-          // Collect report info
-          const sharedWith: string[] = [];
-          if (nb.iamPolicy && nb.iamPolicy.bindings) {
-            for (const binding of nb.iamPolicy.bindings) {
-              if (binding.role === 'roles/discoveryengine.agentOwner') continue;
-              if (binding.members) {
-                const filteredMembers = binding.members.filter((member: string) => !userEmail || !member.includes(userEmail));
-                sharedWith.push(...filteredMembers);
-              }
-            }
-          }
-
-          const localFiles: string[] = [];
-          if (nb.sources && nb.sources.length > 0) {
-            for (const source of nb.sources) {
-              if (source.metadata?.agentspaceMetadata) {
-                localFiles.push(source.metadata.agentspaceMetadata.documentName || source.title || 'Unnamed File');
-              } else if (!source.metadata?.googleDocsMetadata && !source.metadata?.youtubeMetadata && !source.metadata?.webpageMetadata && !source.url && !source.webScrapeConfig) {
-                localFiles.push(source.title || source.displayName || 'Unsupported Source');
-              }
-            }
-          }
-
-          report.push({
-            notebookTitle: nb.title || nb.displayName || 'Unnamed Notebook',
-            sharedWith: Array.from(new Set(sharedWith)),
-            localFiles: localFiles,
-          });
-
-        } catch (nbErr: any) {
-          addLog(`  - Error restoring notebook ${nb.title}: ${nbErr.message}`);
-        }
-      }
-    }
-    
-    setManualActionReport(report);
-    addLog(`Migration complete!`);
-    setIsRestoreComplete(true);
+    addLog("Auto-detection complete. Presenting confirmation popup to review items...");
   });
 
   const handleUserRestoreCombined = async () => executeOperation('RestoreUserData', async () => {
@@ -1620,12 +1711,14 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           displayName: agent.displayName || 'Unnamed Agent',
           agentType: 'Agent',
           disabled: exists,
-          disabledReason: exists ? 'Already exists in target' : undefined
+          disabledReason: exists ? 'Already exists in target' : undefined,
+          category: agent.category
         };
       });
 
       const notebookItems: SelectableItem[] = (backupData.notebooks || []).map((nb: any) => {
-        const targetTitle = `${nb.title || 'Restored Notebook'} (Restored)`;
+        const cleanTitle = nb.title || 'Restored Notebook';
+        const targetTitle = cleanTitle.endsWith(' (Restored)') ? cleanTitle : `${cleanTitle} (Restored)`;
         const exists = targetNotebookTitles.has(nb.title) || targetNotebookTitles.has(targetTitle);
         return {
           name: nb.name,
@@ -1680,7 +1773,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
         
         addLog(`Backup complete! File downloaded: agentspace-user-backup__${userEmail}.json`);
       });
-    } else if (selectionModalAction === 'restore') {
+    } else if (selectionModalAction === 'restore' || selectionModalAction === 'migrate') {
       executeOperation('RestoreUserData', async () => {
         addLog(`Restoring selected items...`);
         const filteredAgents = pendingBackupData.agents.filter((a: any) => selectedNames.has(a.name));
@@ -1713,9 +1806,10 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           }
 
           for (const nb of filteredNotebooks) {
-            const targetTitle = `${nb.title || 'Restored Notebook'} (Restored)`;
+            const cleanTitle = nb.title || 'Restored Notebook';
+            const targetTitle = cleanTitle.endsWith(' (Restored)') ? cleanTitle : `${cleanTitle} (Restored)`;
             
-            const alreadyExists = existingNotebooks.some((n: any) => n.title === targetTitle);
+            const alreadyExists = existingNotebooks.some((n: any) => n.title === targetTitle || n.title === cleanTitle);
             if (alreadyExists) {
               addLog(`  - Skipping notebook "${nb.title}" (already restored)`);
               continue;
@@ -2024,10 +2118,36 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
   };
 
   const restoreAgentsIntoAssistant = async (agents: Agent[], restoreConfig: typeof apiConfig, sourceConfig?: any) => {
+
+
+    const handleIamError = (err: any, agentId: string) => {
+      const msg = err.message || '';
+      if (msg.toLowerCase().includes("cannot set iam policy on a private agent")) {
+        addLog(`      - INFO: Agent '${agentId}' is a private agent. Skipping IAM policy configuration as private agents do not support IAM policies.`);
+      } else {
+        addLog(`      - WARNING: Failed to apply IAM policy snapshot for agent ${agentId}: ${msg}`);
+      }
+    };
+
     addLog(`  - Restoring ${agents.length} agent(s)...`);
+    
+    // 1. Fetch existing agents in target assistant to check for duplicates
+    const existingAgents: Agent[] = [];
+    let pageToken: string | undefined = undefined;
+    try {
+      do {
+        const agentsResponse = await api.listResources('agents', restoreConfig, pageToken);
+        existingAgents.push(...(agentsResponse.agents || []));
+        pageToken = agentsResponse.nextPageToken;
+      } while (pageToken);
+      addLog(`    - Checked target project: Found ${existingAgents.length} existing agent(s).`);
+    } catch (e) {
+      addLog(`    - Warning: Failed to fetch existing target agents to check for duplicates: ${(e as any).message}`);
+    }
+
     for (const agent of agents) {
       const originalAgentId = agent.name.split('/').pop()!;
-      addLog(`    - Preparing to restore agent: ${agent.displayName} (from original ID: ${originalAgentId}) as a new agent.`);
+      addLog(`    - Preparing to restore agent: ${agent.displayName} (from original ID: ${originalAgentId})`);
 
       const buildPayload = (currentAgent: Agent): any => {
         const finalStarterPrompts = (currentAgent.starterPrompts || [])
@@ -2052,7 +2172,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
         };
 
         // Copy all other fields except blacklist to be complete
-        const blacklist = ['name', 'createTime', 'updateTime', 'agentIdentityInfo', 'iamPolicy'];
+        const blacklist = ['name', 'createTime', 'updateTime', 'agentIdentityInfo', 'iamPolicy', 'agentType', 'disabled', 'disabledReason'];
         for (const key of Object.keys(currentAgent)) {
           if (!blacklist.includes(key) && !(key in payload)) {
             payload[key] = (currentAgent as any)[key];
@@ -2211,40 +2331,59 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
       };
 
       let createPayload = buildPayload(agent);
-  
+      
+      // Check for existing agent to prevent duplicates
+      const cleanDisplayName = agent.displayName.replace('[Replace] ', '');
+      const existingAgent = existingAgents.find(a => a.displayName === cleanDisplayName || a.displayName === agent.displayName);
+
       try {
-        // Create the agent, specifying the target ID if provided.
-        const targetId = (agent as any).targetId;
-        const newAgent = await api.createAgent(createPayload, restoreConfig, targetId);
-        const newAgentId = newAgent.name.split('/').pop()!;
-        addLog(`      - CREATED: Agent '${agent.displayName}' created successfully with new ID '${newAgentId}'.`);
-        
+        let targetAgentName = "";
+        let targetAgentId = "";
+
+        if (existingAgent) {
+          targetAgentName = existingAgent.name;
+          targetAgentId = targetAgentName.split('/').pop()!;
+          addLog(`      - EXISTS: Agent with name '${existingAgent.displayName}' already exists. Overwriting/updating configuration in-place...`);
+          
+          // Update the existing agent
+          await api.updateAgent(existingAgent, createPayload, restoreConfig);
+          addLog(`      - UPDATED: Agent '${agent.displayName}' updated successfully.`);
+        } else {
+          const targetId = (agent as any).targetId;
+          const newAgent = await api.createAgent(createPayload, restoreConfig, targetId);
+          targetAgentName = newAgent.name;
+          targetAgentId = targetAgentName.split('/').pop()!;
+          addLog(`      - CREATED: Agent '${agent.displayName}' created successfully with new ID '${targetAgentId}'.`);
+        }
+
+
+
         if ((agent as any).iamPolicy && (agent as any).iamPolicy.bindings) {
           const hasAgentUser = (agent as any).iamPolicy.bindings.some((b: any) => b.role === 'roles/discoveryengine.agentUser');
           
           if (hasAgentUser) {
             try {
-              addLog(`      - Fetching current IAM policy for new agent: ${newAgentId} to get etag...`);
-              const currentPolicy = await api.getAgentIamPolicy(newAgent.name, restoreConfig);
+              addLog(`      - Fetching current IAM policy for agent: ${targetAgentId} to get etag...`);
+              const currentPolicy = await api.getAgentIamPolicy(targetAgentName, restoreConfig);
             
-            addLog(`      - Restoring IAM policy bindings for new agent: ${newAgentId}...`);
-            // Map agentOwner to agentEditor to bypass API restrictions
-            const mappedBindings = (agent as any).iamPolicy.bindings.map((b: any) => {
-              if (b.role === 'roles/discoveryengine.agentOwner') {
-                return { ...b, role: 'roles/discoveryengine.agentEditor' };
-              }
-              return b;
-            });
-            
-            const payloadPolicy = { 
-              bindings: mappedBindings,
-              etag: currentPolicy.etag
-            };
-            await api.setAgentIamPolicy(newAgent.name, payloadPolicy, restoreConfig);
-            addLog(`      - IAM policy successfully restored for agent: ${newAgentId}`);
-          } catch (iamErr: any) {
-            addLog(`      - WARNING: Failed to apply IAM policy snapshot for agent ${newAgentId}: ${iamErr.message}`);
-          }
+              addLog(`      - Restoring IAM policy bindings for agent: ${targetAgentId}...`);
+              // Map agentOwner to agentEditor to bypass API restrictions
+              const mappedBindings = (agent as any).iamPolicy.bindings.map((b: any) => {
+                if (b.role === 'roles/discoveryengine.agentOwner') {
+                  return { ...b, role: 'roles/discoveryengine.agentEditor' };
+                }
+                return b;
+              });
+              
+              const payloadPolicy = { 
+                bindings: mappedBindings,
+                etag: currentPolicy.etag
+              };
+              await api.setAgentIamPolicy(targetAgentName, payloadPolicy, restoreConfig, true);
+              addLog(`      - IAM policy successfully restored for agent: ${targetAgentId}`);
+            } catch (iamErr: any) {
+              handleIamError(iamErr, targetAgentId);
+            }
           } else {
             addLog(`      - Skipping IAM policy restore as backup does not contain any agentUser bindings (likely a private agent).`);
           }
@@ -2297,6 +2436,8 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             const newAgentId = newAgent.name.split('/').pop()!;
             addLog(`      - CREATED: Agent '${agent.displayName}' created successfully with new ID '${newAgentId}' and new authorization.`);
             
+
+
             if ((agent as any).iamPolicy && (agent as any).iamPolicy.bindings) {
               const hasAgentUser = (agent as any).iamPolicy.bindings.some((b: any) => b.role === 'roles/discoveryengine.agentUser');
               
@@ -2305,24 +2446,24 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                   addLog(`      - Fetching current IAM policy for new agent: ${newAgentId} to get etag...`);
                   const currentPolicy = await api.getAgentIamPolicy(newAgent.name, restoreConfig);
                 
-                addLog(`      - Restoring IAM policy bindings for new agent: ${newAgentId}...`);
-                // Map agentOwner to agentEditor to bypass API restrictions
-                const mappedBindings = (agent as any).iamPolicy.bindings.map((b: any) => {
-                  if (b.role === 'roles/discoveryengine.agentOwner') {
-                    return { ...b, role: 'roles/discoveryengine.agentEditor' };
-                  }
-                  return b;
-                });
+                  addLog(`      - Restoring IAM policy bindings for new agent: ${newAgentId}...`);
+                  // Map agentOwner to agentEditor to bypass API restrictions
+                  const mappedBindings = (agent as any).iamPolicy.bindings.map((b: any) => {
+                    if (b.role === 'roles/discoveryengine.agentOwner') {
+                      return { ...b, role: 'roles/discoveryengine.agentEditor' };
+                    }
+                    return b;
+                  });
 
-                const payloadPolicy = { 
-                  bindings: mappedBindings,
-                  etag: currentPolicy.etag
-                };
-                await api.setAgentIamPolicy(newAgent.name, payloadPolicy, restoreConfig);
-                addLog(`      - IAM policy successfully restored for agent: ${newAgentId}`);
-              } catch (iamErr: any) {
-                addLog(`      - WARNING: Failed to apply IAM policy snapshot for agent ${newAgentId}: ${iamErr.message}`);
-              }
+                  const payloadPolicy = { 
+                    bindings: mappedBindings,
+                    etag: currentPolicy.etag
+                  };
+                  await api.setAgentIamPolicy(newAgent.name, payloadPolicy, restoreConfig, true);
+                  addLog(`      - IAM policy successfully restored for agent: ${newAgentId}`);
+                } catch (iamErr: any) {
+                  handleIamError(iamErr, newAgentId);
+                }
               } else {
                 addLog(`      - Skipping IAM policy restore as backup does not contain any agentUser bindings (likely a private agent).`);
               }
@@ -2408,7 +2549,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           addLog(`  - Restoring Notebook '${notebook.displayName}'...`);
 
           // Construct a clean payload
-          const { name, displayName, createTime, updateTime, sources, ...rest } = notebook;
+          const { name, displayName, createTime, updateTime, sources, disabled, disabledReason, agentType, ...rest } = notebook;
           const payload: any = { ...rest };
 
           if (notebook.displayName || notebook.title) {
@@ -2750,7 +2891,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           items={selectionModalItems}
           isLoading={isLoading}
           showIdInput={false}
-          actionLabel={selectionModalAction === 'backup' ? 'Backup' : 'Restore'}
+          actionLabel={selectionModalAction === 'backup' ? 'Backup' : (selectionModalAction === 'migrate' ? 'Migrate' : 'Restore')}
         />
       )}
 
@@ -2902,6 +3043,28 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                   </div>
                 </div>
               </div>
+
+              {/* Migration Scope / Security Options */}
+              <div className="border-t border-gray-100 pt-4">
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">Migration Scope / WIF Access Control</h3>
+                <div className="flex items-start gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="bypassOwnerFilter"
+                    checked={!!userTabConfig.bypassOwnerFilter} 
+                    onChange={(e) => setUserTabConfig(prev => ({ ...prev, bypassOwnerFilter: e.target.checked }))} 
+                    className="mt-1 w-4 h-4 rounded text-indigo-600 border-gray-300 focus:ring-indigo-500"
+                  />
+                  <div>
+                    <label htmlFor="bypassOwnerFilter" className="text-sm font-medium text-gray-700 cursor-pointer select-none">
+                      Migrate all agents in selected Engine (bypasses WIF user-level owner filtering)
+                    </label>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Check this if the selected source Engine represents a personal or single-user workspace app. Bypassing individual owner check ensures default agents (e.g., HR-Advisory2) and shared assets are correctly migrated.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div className="flex justify-end mt-6">
@@ -2998,7 +3161,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             </div>
           )}
 
-          {import.meta.env.VITE_IDP_CHANGE_ENABLED === 'true' ? (
+          {featureFlags.idpChangeEnabled ? (
             <>
               {/* Step 1: Backup from Source */}
               <div className="mb-6 p-4 rounded-lg border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700">
@@ -3691,7 +3854,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
       )}
 
         {/* Logs Section */}
-        {isAdminModeEnabled && (isLoading || logs.length > 0) && (
+        {(isLoading || logs.length > 0) && (
           <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700 mt-6">
             <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center">
               {isLoading && <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-blue-600 mr-3"></div>}
