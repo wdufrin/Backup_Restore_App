@@ -207,7 +207,9 @@ const BackupPage: React.FC<BackupPageProps> = ({
     collectionId: 'default_collection',
     assistantId: 'default_assistant',
   });
-  const isAdminModeEnabled = import.meta.env.VITE_ENABLE_ADMIN_MODE === 'true';
+  const isAdminModeEnabled = 
+    import.meta.env.VITE_ENABLE_ADMIN_MODE === 'true' || 
+    new URLSearchParams(window.location.search).get('admin') === 'true';
   const [activeTab, setActiveTab] = useState<'admin' | 'user'>(isAdminModeEnabled ? 'admin' : 'user');
   interface UserTabConfig {
     sourceProject: string;
