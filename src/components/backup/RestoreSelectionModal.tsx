@@ -54,6 +54,7 @@ const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
 }) => {
   const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set());
   const [customIds, setCustomIds] = useState<Record<string, string>>({});
+  const [showOptional, setShowOptional] = useState<boolean>(true);
 
   useEffect(() => {
     if (isOpen) {
@@ -180,9 +181,22 @@ const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
             </div>
           )}
 
-          <div className="flex justify-between items-center mb-4">
-            <div className="text-sm text-gray-700 font-medium">
-              {selectedNames.size} of {items.length} selected
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 mb-4 pb-3 border-b border-gray-100">
+            <div className="flex items-center gap-4">
+              <div className="text-sm text-gray-700 font-medium">
+                {selectedNames.size} of {items.length} selected
+              </div>
+              {optionalItems.length > 0 && (
+                <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer select-none">
+                  <input 
+                    type="checkbox" 
+                    checked={showOptional} 
+                    onChange={(e) => setShowOptional(e.target.checked)}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5 cursor-pointer"
+                  />
+                  Show Optional Agents
+                </label>
+              )}
             </div>
             <div className="space-x-4">
               <button onClick={handleSelectAll} disabled={isAllSelected} className="text-sm font-semibold text-blue-600 hover:text-blue-700 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors">Select All</button>
@@ -202,14 +216,16 @@ const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
                   </ul>
                 </div>
               )}
-              <div>
-                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1 select-none">
-                  ➕ Optional / Shared Agents (No explicit WIF owner)
-                </h3>
-                <ul className="space-y-2 bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-                  {optionalItems.map(renderItem)}
-                </ul>
-              </div>
+              {showOptional && (
+                <div>
+                  <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1 select-none">
+                    ➕ Optional / Shared Agents (No explicit WIF owner)
+                  </h3>
+                  <ul className="space-y-2 bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                    {optionalItems.map(renderItem)}
+                  </ul>
+                </div>
+              )}
             </div>
           ) : (
             <ul className="space-y-2 bg-white p-4 rounded-lg border border-gray-200 shadow-sm">

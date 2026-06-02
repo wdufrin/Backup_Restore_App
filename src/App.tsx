@@ -16,9 +16,23 @@ function App() {
   const isAdminModeEnabled = import.meta.env.VITE_ENABLE_ADMIN_MODE === 'true';
   const sourceIdp = import.meta.env.VITE_SOURCE_IDP || 'Google';
   const targetIdp = import.meta.env.VITE_TARGET_IDP || 'Google';
-  const isIdpChangeEnabled = sourceIdp !== targetIdp;
-  const enableGoogleIdp = import.meta.env.VITE_ENABLE_GOOGLE_IDP !== 'false';
-  const enableWifIdp = import.meta.env.VITE_ENABLE_WIF_IDP !== 'false';
+
+  const [featureFlags, setFeatureFlags] = useState(() => {
+    const saved = localStorage.getItem('agentspace-featureFlags');
+    return saved ? JSON.parse(saved) : {
+      idpChangeEnabled: import.meta.env.VITE_IDP_CHANGE_ENABLED === 'true',
+      enableGoogleIdp: import.meta.env.VITE_ENABLE_GOOGLE_IDP !== 'false',
+      enableWifIdp: import.meta.env.VITE_ENABLE_WIF_IDP === 'true',
+    };
+  });
+
+  const [googleClientId, setGoogleClientId] = useState(() => {
+    return localStorage.getItem('agentspace-googleClientId') || import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+  });
+
+  const isIdpChangeEnabled = featureFlags.idpChangeEnabled;
+  const enableGoogleIdp = featureFlags.enableGoogleIdp;
+  const enableWifIdp = featureFlags.enableWifIdp;
 
   const [accessToken, setAccessToken] = useState<string>(() => sessionStorage.getItem('agentspace-accessToken') || '');
   const [sourceToken, setSourceToken] = useState<string>(() => sessionStorage.getItem('agentspace-sourceToken') || '');
@@ -94,9 +108,9 @@ function App() {
     script.async = true;
     script.defer = true;
     script.onload = () => {
-      if (window.google && window.google.accounts && GOOGLE_CLIENT_ID) {
+      if (window.google && window.google.accounts && googleClientId) {
         tokenClient.current = window.google.accounts.oauth2.initTokenClient({
-          client_id: GOOGLE_CLIENT_ID,
+          client_id: googleClientId,
           scope: 'https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/dialogflow',
           callback: (tokenResponse: any) => {
             if (tokenResponse && tokenResponse.access_token) {
@@ -136,7 +150,7 @@ function App() {
       }
     };
     document.body.appendChild(script);
-  }, [handleSetAccessToken]);
+  }, [handleSetAccessToken, googleClientId, isIdpChangeEnabled, sourceIdp, targetIdp]);
 
   const handleGoogleSignIn = () => {
     if (tokenClient.current) {
@@ -321,6 +335,12 @@ function App() {
               isSettingsOpen={isSettingsOpen}
               onCloseSettings={() => setIsSettingsOpen(false)}
               poolId={wifConfig.poolId}
+              featureFlags={featureFlags}
+              setFeatureFlags={setFeatureFlags}
+              googleClientId={googleClientId}
+              setGoogleClientId={setGoogleClientId}
+              wifConfigState={wifConfig}
+              setWifConfigState={setWifConfig}
             />
           ) : (
             <div className="flex flex-col items-center justify-center mt-20">

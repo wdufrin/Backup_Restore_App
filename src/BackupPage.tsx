@@ -41,6 +41,12 @@ interface BackupPageProps {
   isSettingsOpen?: boolean;
   onCloseSettings?: () => void;
   poolId?: string;
+  featureFlags: { idpChangeEnabled: boolean, enableGoogleIdp: boolean, enableWifIdp: boolean };
+  setFeatureFlags: React.Dispatch<React.SetStateAction<{ idpChangeEnabled: boolean, enableGoogleIdp: boolean, enableWifIdp: boolean }>>;
+  googleClientId: string;
+  setGoogleClientId: (id: string) => void;
+  wifConfigState: any;
+  setWifConfigState: React.Dispatch<React.SetStateAction<any>>;
 }
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -149,12 +155,50 @@ const isAgentOwnedByUser = (agent: any, userEmail: string, userSub: string, pool
     }
   }
 
+  // 5. Smart prefix-based match (e.g., matching Google user 'wdufrin' with WIF principal 'admin@wdufrin.allostrat.com')
+  if (userEmail) {
+    const prefix = userEmail.split('@')[0].toLowerCase();
+    if (prefix && prefix.length > 2) {
+      if (owner && owner.toLowerCase().includes(prefix)) return true;
+      if (fullMember && fullMember.toLowerCase().includes(prefix)) return true;
+      if (agent.ownerDisplayName && agent.ownerDisplayName.toLowerCase().includes(prefix)) return true;
+      if (agent.ownerUserPrincipal && agent.ownerUserPrincipal.toLowerCase().includes(prefix)) return true;
+      if (agent.agentView?.ownerUserPrincipal && agent.agentView.ownerUserPrincipal.toLowerCase().includes(prefix)) return true;
+      if (agent.agentView?.ownerDisplayName && agent.agentView.ownerDisplayName.toLowerCase().includes(prefix)) return true;
+
+      for (const key of definitionKeys) {
+        const definition = (agent as any)[key];
+        if (definition && definition.owner && definition.owner.toLowerCase().includes(prefix)) return true;
+      }
+    }
+  }
+
   return false;
 };
 
 // --- Main Page Component ---
 
-const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targetToken, onGoogleSignIn, onWifSignIn, onSignOut, projectNumber, setProjectNumber, userEmail, userSub, isSettingsOpen, onCloseSettings, poolId }) => {
+const BackupPage: React.FC<BackupPageProps> = ({ 
+  accessToken, 
+  sourceToken, 
+  targetToken, 
+  onGoogleSignIn, 
+  onWifSignIn, 
+  onSignOut, 
+  projectNumber, 
+  setProjectNumber, 
+  userEmail, 
+  userSub, 
+  isSettingsOpen, 
+  onCloseSettings, 
+  poolId,
+  featureFlags,
+  setFeatureFlags,
+  googleClientId,
+  setGoogleClientId,
+  wifConfigState,
+  setWifConfigState
+}) => {
   const [config, setConfig] = useState({
     appLocation: 'global',
     appId: '',
@@ -174,6 +218,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
     targetAppId: string;
     targetAppUrl: string;
     bypassOwnerFilter?: boolean;
+    enableAgentViewFallback?: boolean;
   }
 
   const [userTabConfig, setUserTabConfig] = useState<UserTabConfig>(() => {
@@ -187,6 +232,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
       targetAppId: import.meta.env.VITE_TARGET_APP_ID || '',
       targetAppUrl: import.meta.env.VITE_TARGET_APP_URL || '',
       bypassOwnerFilter: import.meta.env.VITE_BYPASS_OWNER_FILTER === 'true',
+      enableAgentViewFallback: true, // Default to true
     };
   });
   const [isUserConfigModalOpen, setIsUserConfigModalOpen] = useState(false);
@@ -238,30 +284,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
     localStorage.setItem('agentspace-step1Complete', String(isStep1Complete));
   }, [isStep1Complete]);
 
-  const [featureFlags, setFeatureFlags] = useState(() => {
-    const saved = localStorage.getItem('agentspace-featureFlags');
-    return saved ? JSON.parse(saved) : {
-      idpChangeEnabled: import.meta.env.VITE_IDP_CHANGE_ENABLED === 'true',
-      enableGoogleIdp: import.meta.env.VITE_ENABLE_GOOGLE_IDP !== 'false',
-      enableWifIdp: import.meta.env.VITE_ENABLE_WIF_IDP === 'true',
-    };
-  });
-
-  const [googleClientId, setGoogleClientId] = useState(() => {
-    return localStorage.getItem('agentspace-googleClientId') || import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
-  });
-
-  const [wifConfigState, setWifConfigState] = useState(() => {
-    const saved = localStorage.getItem('agentspace-wifConfig');
-    return saved ? JSON.parse(saved) : {
-      userProject: import.meta.env.VITE_WIF_USER_PROJECT || '',
-      poolId: import.meta.env.VITE_WIF_POOL_ID || '',
-      providerId: import.meta.env.VITE_WIF_PROVIDER_ID || '',
-      clientId: import.meta.env.VITE_WIF_CLIENT_ID || '',
-      authEndpoint: import.meta.env.VITE_WIF_AUTH_ENDPOINT || '',
-      redirectUri: import.meta.env.VITE_WIF_REDIRECT_URI || '',
-    };
-  });
+  // Feature flags, Google Client ID, and WIF config are now passed as props from App component for unified reactivity
 
   useEffect(() => {
     if (activeTab === 'admin') {
@@ -343,6 +366,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
     content += `VITE_SOURCE_LOCATION=${userTabConfig.sourceLocation}\n`;
     content += `VITE_SOURCE_APP_ID=${userTabConfig.sourceAppId}\n`;
     content += `VITE_BYPASS_OWNER_FILTER=${userTabConfig.bypassOwnerFilter || false}\n`;
+    content += `VITE_ENABLE_AGENT_VIEW_FALLBACK=${userTabConfig.enableAgentViewFallback || false}\n`;
     
     const sourceIdpVal = import.meta.env.VITE_SOURCE_IDP || 'Google';
     if (featureFlags.idpChangeEnabled) {
@@ -449,6 +473,7 @@ const BackupPage: React.FC<BackupPageProps> = ({ accessToken, sourceToken, targe
             targetAppId: config.VITE_TARGET_APP_ID || '',
             targetAppUrl: config.VITE_TARGET_APP_URL || '',
             bypassOwnerFilter: config.VITE_BYPASS_OWNER_FILTER === 'true',
+            enableAgentViewFallback: config.VITE_ENABLE_AGENT_VIEW_FALLBACK !== 'false', // Default to true if missing/not set to false
           };
           setUserTabConfig(newUserTabConfig);
 
@@ -1192,18 +1217,57 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
       pageToken = agentsResponse.nextPageToken;
     } while (pageToken);
 
+    const lowCodeAgents = [];
     for (const agent of agents) {
       try {
+        // Fetch Agent View to check type
+        let isLowCode = true;
+        try {
+          const rawResponse = await api.getAgentView(agent.name, apiConfig);
+          const agentView = rawResponse?.agentView || rawResponse;
+          const rawAgentType = agentView?.agentType;
+          if (rawAgentType && rawAgentType !== 'LOW_CODE' && rawAgentType !== 'Low Code') {
+            isLowCode = false;
+          }
+        } catch (viewErr) {
+          if (userTabConfig.enableAgentViewFallback) {
+            if (agent.adkAgentDefinition || agent.a2aAgentDefinition) {
+              isLowCode = false;
+            }
+          } else {
+            isLowCode = false;
+          }
+        }
+
+        if (!isLowCode) {
+          if (isDebugMode) {
+            addLog(`[DEBUG] Skipping non-low-code agent ${agent.displayName || agent.name} from backup.`);
+          }
+          continue;
+        }
+
         const policy = await api.getAgentIamPolicy(agent.name, apiConfig);
         if (policy) {
           (agent as any).iamPolicy = policy;
         }
+        lowCodeAgents.push(agent);
       } catch (e) {
-        addLog(`  - Warning: Failed to backup IAM policy for agent ${agent.name}: ${(e as any).message}`);
+        if (userTabConfig.enableAgentViewFallback) {
+          let isLowCode = true;
+          if (agent.adkAgentDefinition || agent.a2aAgentDefinition) {
+            isLowCode = false;
+          }
+          if (isLowCode) {
+            addLog(`  - Warning: Failed to backup IAM policy for agent ${agent.name}: ${(e as any).message}`);
+            lowCodeAgents.push(agent);
+          }
+        } else {
+          addLog(`  - Error: Failed to backup agent ${agent.displayName || agent.name} due to view/policy fetch error: ${(e as any).message}. Skipping agent.`);
+        }
       }
     }
     
-    let agentsToSave = agents;
+    let agentsToSave = lowCodeAgents;
     if (activeTab === 'user') {
       if (userTabConfig.bypassOwnerFilter) {
         addLog(`  - User Tab: Bypassing WIF owner filtering (migrating all agents in the selected app context).`);
@@ -1312,19 +1376,57 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
       pageToken = agentsResponse.nextPageToken;
     } while (pageToken);
 
-    // Fetch IAM policies and categorize
+    // Fetch IAM policies and categorize, while filtering ONLY low-code agents
     const userAgents = [];
     for (const agent of agents) {
       try {
+        // 1. Fetch Agent View to check type
+        let isLowCode = true;
+        try {
+          const rawResponse = await api.getAgentView(agent.name, sourceConfig);
+          const agentView = rawResponse?.agentView || rawResponse;
+          const rawAgentType = agentView?.agentType;
+          if (rawAgentType && rawAgentType !== 'LOW_CODE' && rawAgentType !== 'Low Code') {
+            isLowCode = false;
+          }
+        } catch (viewErr) {
+          // Structural detection fallback if Agent View fetch fails and fallback is enabled
+          if (userTabConfig.enableAgentViewFallback) {
+            if (agent.adkAgentDefinition || agent.a2aAgentDefinition) {
+              isLowCode = false;
+            }
+          } else {
+            isLowCode = false; // Skip if fallback is disabled
+          }
+        }
+
+        if (!isLowCode) {
+          if (isDebugMode) {
+            addLog(`[DEBUG] Skipping non-low-code agent ${agent.displayName || agent.name} from backup.`);
+          }
+          continue;
+        }
+
         const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
-        const agentWithPolicy = { ...agent, iamPolicy: policy };
+        const agentWithPolicy = { ...agent, iamPolicy: policy, agentType: 'Low Code' };
         const isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId);
         (agentWithPolicy as any).category = isOwned ? 'core' : 'optional';
         userAgents.push(agentWithPolicy);
       } catch (e) {
-        addLog(`  - Warning: Failed to backup IAM policy for agent ${agent.name}: ${(e as any).message}`);
-        (agent as any).category = 'optional';
-        userAgents.push(agent);
+        if (userTabConfig.enableAgentViewFallback) {
+          // Fallback: check structural type before adding as optional
+          let isLowCode = true;
+          if (agent.adkAgentDefinition || agent.a2aAgentDefinition) {
+            isLowCode = false;
+          }
+          if (isLowCode) {
+            addLog(`  - Warning: Failed to backup IAM policy for agent ${agent.name}: ${(e as any).message}`);
+            (agent as any).category = 'optional';
+            userAgents.push(agent);
+          }
+        } else {
+          addLog(`  - Error: Failed to backup agent ${agent.displayName || agent.name} due to view/policy fetch error: ${(e as any).message}. Skipping agent.`);
+        }
       }
     }
     addLog(`Found ${userAgents.length} agents in selected engine.`);
@@ -1380,7 +1482,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
     const agentItems: SelectableItem[] = userAgents.map(agent => ({
       name: agent.name,
       displayName: agent.displayName || 'Unnamed Agent',
-      agentType: 'Agent',
+      agentType: agent.agentType || 'Low Code',
       category: (agent as any).category
     }));
 
@@ -1505,6 +1607,14 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           hasOwner = true;
           isOwned = agentOwner.toLowerCase().includes(userEmail.toLowerCase()) || 
                     (userSub && agentOwner.includes(userSub));
+          
+          // Prefix-based matching fallback to handle workforce pools and domain mismatches gracefully
+          if (!isOwned && userEmail) {
+            const prefix = userEmail.split('@')[0].toLowerCase();
+            if (prefix && prefix.length > 2) {
+              isOwned = agentOwner.toLowerCase().includes(prefix);
+            }
+          }
         } else {
           // Fallback to IAM policy if owner is not present in agentView
           try {
@@ -1517,6 +1627,14 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                 isOwned = firstMember.toLowerCase().includes(userEmail.toLowerCase()) ||
                           (userSub && firstMember.includes(userSub)) ||
                           (poolId && firstMember.includes(poolId));
+                
+                // Prefix-based matching fallback
+                if (!isOwned && userEmail) {
+                  const prefix = userEmail.split('@')[0].toLowerCase();
+                  if (prefix && prefix.length > 2) {
+                    isOwned = firstMember.toLowerCase().includes(prefix);
+                  }
+                }
               }
             }
           } catch (policyErr) {
@@ -1541,54 +1659,54 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           });
         }
       } catch (e: any) {
-        addLog(`  - Warning: Failed to fetch Agent View for agent ${agent.displayName}: ${e.message}`);
-        
-        // Fallback: If getAgentView fails (e.g. due to workforce pool permission issues),
-        // perform structural detection to filter out ADK/A2A, and check ownership via IAM policy.
-        
-        // 1. Structural Type Check
-        let agentType = "Low Code";
-        if (agent.adkAgentDefinition) agentType = "ADK";
-        else if (agent.a2aAgentDefinition) agentType = "A2A";
-
-        if (agentType !== 'Low Code') {
-          if (isDebugMode) {
-            addLog(`[DEBUG] Fallback: Skipping non-low-code agent ${agent.displayName || agent.name} (Type: ${agentType}) from migration.`);
-          }
-          continue;
-        }
-
-        // 2. IAM Policy Owner Check
-        let isOwned = false;
-        let hasOwner = false;
-        try {
-          const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
-          const agentWithPolicy = { ...agent, iamPolicy: policy };
+        if (userTabConfig.enableAgentViewFallback) {
+          addLog(`  - Warning: Failed to fetch Agent View for agent ${agent.displayName || agent.name}: ${e.message}. Attempting structural & IAM policy fallback...`);
           
-          isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId);
-          
-          if (policy && policy.bindings) {
-            const ownerBinding = policy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
-            if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
-              hasOwner = true;
+          // 1. Structural Type Check
+          let agentType = "Low Code";
+          if (agent.adkAgentDefinition) agentType = "ADK";
+          else if (agent.a2aAgentDefinition) agentType = "A2A";
+
+          if (agentType !== 'Low Code') {
+            if (isDebugMode) {
+              addLog(`[DEBUG] Fallback: Skipping non-low-code agent ${agent.displayName || agent.name} (Type: ${agentType}) from migration.`);
             }
+            continue;
           }
-          
-          fullBackupAgents.push(agentWithPolicy);
-        } catch (policyErr: any) {
-          addLog(`    - Warning: Failed to fetch IAM policy for fallback: ${policyErr.message}`);
-          // Default to treating as unowned/shared if both APIs fail
-          fullBackupAgents.push(agent);
-        }
 
-        // Only show WIF user-owned agents OR shared/unowned agents (no explicit owner)
-        if (isOwned || !hasOwner) {
-          selectableAgents.push({
-            name: agent.name,
-            displayName: agent.displayName,
-            agentType: 'Low Code',
-            category: isOwned ? 'core' : 'optional'
-          });
+          // 2. IAM Policy Owner Check
+          let isOwned = false;
+          let hasOwner = false;
+          try {
+            const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
+            const agentWithPolicy = { ...agent, iamPolicy: policy };
+            
+            isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId);
+            
+            if (policy && policy.bindings) {
+              const ownerBinding = policy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
+              if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
+                hasOwner = true;
+              }
+            }
+            
+            fullBackupAgents.push(agentWithPolicy);
+          } catch (policyErr: any) {
+            addLog(`    - Warning: Failed to fetch IAM policy for fallback: ${policyErr.message}`);
+            fullBackupAgents.push(agent);
+          }
+
+          // Only show WIF user-owned agents OR shared/unowned agents (no explicit owner)
+          if (isOwned || !hasOwner) {
+            selectableAgents.push({
+              name: agent.name,
+              displayName: agent.displayName,
+              agentType: 'Low Code',
+              category: isOwned ? 'core' : 'optional'
+            });
+          }
+        } else {
+          addLog(`  - Error: Failed to fetch Agent View for agent ${agent.displayName || agent.name}: ${e.message}. Skipping agent.`);
         }
       }
     }
@@ -1709,7 +1827,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
         return {
           name: agent.name,
           displayName: agent.displayName || 'Unnamed Agent',
-          agentType: 'Agent',
+          agentType: agent.agentType || 'Low Code',
           disabled: exists,
           disabledReason: exists ? 'Already exists in target' : undefined,
           category: agent.category
@@ -1958,78 +2076,428 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
     }
   };
 
-  const downloadStepsAsText = () => {
-    let content = "Post-Restore Steps\n";
-    content += "==================\n\n";
-    content += "Please complete the following manual steps to finalize your restoration.\n\n";
+  const downloadStepsAsDocx = async () => {
+    const { Document, Packer, Paragraph, TextRun, HeadingLevel } = await import('docx');
 
-    manualActionReport.forEach(item => {
-      if (item.agentName) {
-        content += `🤖 Agent: "${item.agentName}"\n`;
-        content += `----------------------------------------\n`;
-        content += `- Status: All restored agents are in draft and will need to be created/published.\n`;
-        
-        if (item.sharedWith && item.sharedWith.length > 0) {
-          content += `- Sharing: Please reshare this agent with:\n`;
-          item.sharedWith.forEach(email => {
-            content += `    * ${email}\n`;
-          });
+    const restoredAgents = manualActionReport.filter(item => item.agentName);
+    const restoredNotebooks = manualActionReport.filter(item => item.notebookTitle);
+
+    const children: any[] = [];
+
+    // Header Title
+    children.push(
+      new Paragraph({
+        heading: HeadingLevel.TITLE,
+        children: [
+          new TextRun({
+            text: "Post-Restoration Checklist",
+            bold: true,
+            size: 36, // 18pt
+            color: "1A365D",
+            font: "Calibri",
+          }),
+        ],
+        spacing: { before: 100, after: 50 },
+      }),
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: "Backup & Restore App — Finalization Action Items",
+            size: 20, // 10pt
+            italics: true,
+            color: "4A5568",
+            font: "Calibri",
+          }),
+        ],
+        spacing: { after: 200 },
+      })
+    );
+
+    // Step 1: Publish Restored Agents
+    if (restoredAgents.length > 0) {
+      children.push(
+        new Paragraph({
+          heading: HeadingLevel.HEADING_1,
+          children: [
+            new TextRun({
+              text: "Step 1: Publish Restored Agents",
+              bold: true,
+              size: 26, // 13pt
+              color: "2B6CB0",
+              font: "Calibri",
+            }),
+          ],
+          spacing: { before: 240, after: 100 },
+        }),
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: "Restored agents are imported in Draft mode. You must deploy and publish each agent to make them live.",
+              size: 22, // 11pt
+              color: "4A5568",
+              font: "Calibri",
+            }),
+          ],
+          spacing: { after: 100 },
+        })
+      );
+
+      restoredAgents.forEach(agent => {
+        children.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: "☐  ",
+                bold: true,
+                size: 24,
+                font: "Calibri",
+              }),
+              new TextRun({
+                text: `Publish Agent: "${agent.agentName}"`,
+                bold: true,
+                size: 22,
+                font: "Calibri",
+              }),
+            ],
+            spacing: { before: 60, after: 40 },
+          })
+        );
+      });
+    }
+
+    // Step 2: Update Agent Configurations
+    if (restoredAgents.length > 0) {
+      children.push(
+        new Paragraph({
+          heading: HeadingLevel.HEADING_1,
+          children: [
+            new TextRun({
+              text: "Step 2: Update Agent Configurations",
+              bold: true,
+              size: 26,
+              color: "4C51BF",
+              font: "Calibri",
+            }),
+          ],
+          spacing: { before: 240, after: 100 },
+        }),
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: "Verify and update configuration settings for restored agents (e.g., system instructions, models, parameters).",
+              size: 22,
+              color: "4A5568",
+              font: "Calibri",
+            }),
+          ],
+          spacing: { after: 100 },
+        })
+      );
+
+      restoredAgents.forEach(agent => {
+        children.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: "☐  ",
+                bold: true,
+                size: 24,
+                font: "Calibri",
+              }),
+              new TextRun({
+                text: `Verify configurations for: "${agent.agentName}"`,
+                bold: true,
+                size: 22,
+                font: "Calibri",
+              }),
+            ],
+            spacing: { before: 60, after: 40 },
+          })
+        );
+      });
+    }
+
+    // Step 3: Adding Files
+    const step3AgentItems = restoredAgents.filter(item => 
+      (item.knowledgeAttachments && item.knowledgeAttachments.length > 0) || 
+      (item.agentFiles && item.agentFiles.length > 0) ||
+      (item.unmappedDatastores && item.unmappedDatastores.length > 0)
+    );
+    const step3NotebookItems = restoredNotebooks.filter(item => 
+      item.localFiles && item.localFiles.length > 0
+    );
+
+    if (step3AgentItems.length > 0 || step3NotebookItems.length > 0) {
+      children.push(
+        new Paragraph({
+          heading: HeadingLevel.HEADING_1,
+          children: [
+            new TextRun({
+              text: "Step 3: Adding Files & Missing Datastores",
+              bold: true,
+              size: 26,
+              color: "D69E2E",
+              font: "Calibri",
+            }),
+          ],
+          spacing: { before: 240, after: 100 },
+        }),
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: "Re-upload local knowledge files or re-attach datastores that could not be mapped automatically.",
+              size: 22,
+              color: "4A5568",
+              font: "Calibri",
+            }),
+          ],
+          spacing: { after: 100 },
+        })
+      );
+
+      step3AgentItems.forEach(agent => {
+        children.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: "☐  ",
+                bold: true,
+                size: 24,
+                font: "Calibri",
+              }),
+              new TextRun({
+                text: `Restore knowledge attachments for Agent: "${agent.agentName}"`,
+                bold: true,
+                size: 22,
+                font: "Calibri",
+              }),
+            ],
+            spacing: { before: 60, after: 40 },
+          })
+        );
+
+        if (agent.unmappedDatastores && agent.unmappedDatastores.length > 0) {
+          children.push(
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: "     * Unmapped Datastores (Action Required): " + agent.unmappedDatastores.join(", "),
+                  size: 20,
+                  color: "E53E3E",
+                  font: "Calibri",
+                }),
+              ],
+              spacing: { after: 40 },
+            })
+          );
+        }
+
+        if (agent.agentFiles && agent.agentFiles.length > 0) {
+          children.push(
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: "     * Missing Knowledge Files: " + agent.agentFiles.join(", "),
+                  size: 20,
+                  color: "D69E2E",
+                  font: "Calibri",
+                }),
+              ],
+              spacing: { after: 40 },
+            })
+          );
+        }
+      });
+
+      step3NotebookItems.forEach(nb => {
+        children.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: "☐  ",
+                bold: true,
+                size: 24,
+                font: "Calibri",
+              }),
+              new TextRun({
+                text: `Re-upload local files for Notebook: "${nb.notebookTitle}"`,
+                bold: true,
+                size: 22,
+                font: "Calibri",
+              }),
+            ],
+            spacing: { before: 60, after: 40 },
+          })
+        );
+
+        if (nb.localFiles && nb.localFiles.length > 0) {
+          children.push(
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: "     * Local Files: " + nb.localFiles.join(", "),
+                  size: 20,
+                  color: "D69E2E",
+                  font: "Calibri",
+                }),
+              ],
+              spacing: { after: 40 },
+            })
+          );
+        }
+      });
+    }
+
+    // Step 4: Sharing
+    if (restoredAgents.length > 0 || restoredNotebooks.length > 0) {
+      children.push(
+        new Paragraph({
+          heading: HeadingLevel.HEADING_1,
+          children: [
+            new TextRun({
+              text: "Step 4: Share & Restore Permissions",
+              bold: true,
+              size: 26,
+              color: "6B46C1",
+              font: "Calibri",
+            }),
+          ],
+          spacing: { before: 240, after: 100 },
+        }),
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: "Reshare restored agents and notebooks with appropriate users or groups.",
+              size: 22,
+              color: "4A5568",
+              font: "Calibri",
+            }),
+          ],
+          spacing: { after: 100 },
+        })
+      );
+
+      restoredAgents.forEach(agent => {
+        children.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: "☐  ",
+                bold: true,
+                size: 24,
+                font: "Calibri",
+              }),
+              new TextRun({
+                text: `Share Agent: "${agent.agentName}"`,
+                bold: true,
+                size: 22,
+                font: "Calibri",
+              }),
+            ],
+            spacing: { before: 60, after: 40 },
+          })
+        );
+
+        if (agent.sharedWith && agent.sharedWith.length > 0) {
+          children.push(
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: "     * Share with: " + agent.sharedWith.join(", "),
+                  size: 20,
+                  color: "6B46C1",
+                  font: "Calibri",
+                }),
+              ],
+              spacing: { after: 40 },
+            })
+          );
         } else {
-          content += `- Sharing: No sharing permissions found in backup.\n`;
+          children.push(
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: "     * No sharing permissions found in backup.",
+                  size: 20,
+                  color: "718096",
+                  font: "Calibri",
+                }),
+              ],
+              spacing: { after: 40 },
+            })
+          );
         }
+      });
 
-        if (item.knowledgeAttachments && item.knowledgeAttachments.length > 0) {
-          content += `- Knowledge Attachments:\n`;
-          item.knowledgeAttachments.forEach(dsId => {
-            content += `    * ${dsId}\n`;
-          });
-        }
+      restoredNotebooks.forEach(nb => {
+        children.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: "☐  ",
+                bold: true,
+                size: 24,
+                font: "Calibri",
+              }),
+              new TextRun({
+                text: `Share Notebook: "${nb.notebookTitle}"`,
+                bold: true,
+                size: 22,
+                font: "Calibri",
+              }),
+            ],
+            spacing: { before: 60, after: 40 },
+          })
+        );
 
-        if (item.agentFiles && item.agentFiles.length > 0) {
-          content += `- Knowledge Files:\n`;
-          item.agentFiles.forEach(fileName => {
-            content += `    * ${fileName}\n`;
-          });
-        }
-
-        if (item.unmappedDatastores && item.unmappedDatastores.length > 0) {
-          content += `- Unmapped Datastores: The following datastores could not be remapped and need manual review:\n`;
-          item.unmappedDatastores.forEach(dsId => {
-            content += `    * ${dsId}\n`;
-          });
+        if (nb.sharedWith && nb.sharedWith.length > 0) {
+          children.push(
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: "     * Share with: " + nb.sharedWith.join(", "),
+                  size: 20,
+                  color: "6B46C1",
+                  font: "Calibri",
+                }),
+              ],
+              spacing: { after: 40 },
+            })
+          );
         } else {
-          content += `- Datastores: All datastores were successfully mapped or none were attached.\n`;
+          children.push(
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: "     * We are unable to retrieve shared users from source. Please manually document and reshare if needed.",
+                  size: 20,
+                  color: "718096",
+                  font: "Calibri",
+                }),
+              ],
+              spacing: { after: 40 },
+            })
+          );
         }
-      } else {
-        content += `📓 Notebook: "${item.notebookTitle}"\n`;
-        content += `----------------------------------------\n`;
-        content += `- Status: Notebook restored. Please check sources and sharing.\n`;
-        if (item.sharedWith && item.sharedWith.length > 0) {
-          content += `- Sharing: Please reshare this notebook with:\n`;
-          item.sharedWith.forEach(email => {
-            content += `    * ${email}\n`;
-          });
-        } else {
-          content += `- Sharing: We are unable to retrieve shared users from source. Please manually document and reshare your notebooks if needed.\n`;
-        }
+      });
+    }
 
-        if (item.localFiles && item.localFiles.length > 0) {
-          content += `- Local Files: The following local files were attached to the original notebook and need to be re-added manually:\n`;
-          item.localFiles.forEach(file => {
-            content += `    * ${file}\n`;
-          });
-        } else {
-          content += `- Local Files: No local files detected or all sources are external.\n`;
-        }
-      }
-      content += `\n`;
+    // Create the Document
+    const doc = new Document({
+      sections: [
+        {
+          properties: {},
+          children: children,
+        },
+      ],
     });
 
-    const blob = new Blob([content], { type: 'text/plain' });
+    // Pack and download
+    const blob = await Packer.toBlob(doc);
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `post_restore_steps.txt`;
+    link.download = `post_restore_steps.docx`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -2172,7 +2640,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
         };
 
         // Copy all other fields except blacklist to be complete
-        const blacklist = ['name', 'createTime', 'updateTime', 'agentIdentityInfo', 'iamPolicy', 'agentType', 'disabled', 'disabledReason'];
+        const blacklist = ['name', 'createTime', 'updateTime', 'agentIdentityInfo', 'iamPolicy', 'agentType', 'disabled', 'disabledReason', 'category'];
         for (const key of Object.keys(currentAgent)) {
           if (!blacklist.includes(key) && !(key in payload)) {
             payload[key] = (currentAgent as any)[key];
@@ -2653,176 +3121,237 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
         </p>
       );
     }
+
+    const restoredAgents = manualActionReport.filter(item => item.agentName);
+    const restoredNotebooks = manualActionReport.filter(item => item.notebookTitle);
+
+    // Step 3 items
+    const step3AgentItems = restoredAgents.filter(item => 
+      (item.knowledgeAttachments && item.knowledgeAttachments.length > 0) || 
+      (item.agentFiles && item.agentFiles.length > 0) ||
+      (item.unmappedDatastores && item.unmappedDatastores.length > 0)
+    );
+    const step3NotebookItems = restoredNotebooks.filter(item => 
+      item.localFiles && item.localFiles.length > 0
+    );
+
+    // Step 4 items
+    const step4AgentItems = restoredAgents;
+    const step4NotebookItems = restoredNotebooks;
+
     return (
-      <div className="space-y-4">
-        <p className="text-xs text-gray-600 dark:text-white mb-3">
+      <div className="space-y-6 text-xs text-gray-800 dark:text-gray-200">
+        <p className="text-xs text-gray-600 dark:text-white mb-4 font-medium">
           Please complete the following manual steps to finalize your restoration.
         </p>
-        
-        <div className="space-y-4">
-          {manualActionReport.map((item, idx) => (
-            <div key={idx} className="bg-gray-50 dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm space-y-3">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                {item.agentName ? (
-                  <><span className="text-blue-500">🤖</span> {item.agentName}</>
-                ) : (
-                  <><span className="text-green-500">📓</span> {item.notebookTitle}</>
-                )}
-              </h3>
-              
-              {item.agentName ? (
-                <>
-                  <div className="text-xs text-gray-600">
-                    <p className="font-medium text-yellow-700 bg-yellow-50 p-2 rounded-lg border border-yellow-100">
-                      ℹ️ All restored agents are in draft and will need to be created/published.
-                    </p>
+
+        {/* Step 1: Publish */}
+        {restoredAgents.length > 0 && (
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm space-y-3">
+            <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
+              <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-[10px] font-bold">1</span>
+              Step 1: Publish Restored Agents
+            </h3>
+            <p className="text-gray-500 text-[11px]">
+              Restored agents are imported in <strong>Draft</strong> mode. You must deploy and publish each agent to make them live.
+            </p>
+            <div className="space-y-2 pt-1">
+              {restoredAgents.map((agent, idx) => (
+                <div key={idx} className="flex items-start gap-2 bg-gray-50 dark:bg-slate-800 p-2 rounded-lg border border-gray-100 dark:border-slate-700">
+                  <input type="checkbox" className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
+                  <div>
+                    <p className="font-semibold text-gray-900 dark:text-white">Publish Agent: "{agent.agentName}"</p>
+                    <p className="text-[10px] text-gray-500">Navigate to the agent console and click <strong>Deploy/Publish</strong>.</p>
                   </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
-                  {item.sharedWith && item.sharedWith.length > 0 ? (
-                    <div>
-                      <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
-                        <span className="text-purple-500">👥</span> Reshare with:
-                      </h4>
-                      <div className="flex flex-wrap gap-1">
-                        {item.sharedWith.map((user, uidx) => (
-                          <span key={uidx} className="px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded text-[10px] font-medium">
-                            {user}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-xs text-gray-500 flex items-center gap-1">
-                      <span className="text-purple-300">👥</span> No sharing permissions found in backup.
-                    </div>
-                  )}
-
-                  {item.knowledgeAttachments && item.knowledgeAttachments.length > 0 && (
-                    <div>
-                      <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
-                        <span className="text-blue-500">📚</span> Knowledge Attachments:
-                      </h4>
-                      <ul className="space-y-1 text-xs text-gray-600">
-                        {item.knowledgeAttachments.map((dsId, dsIdx) => (
-                          <li key={dsIdx} className="font-mono text-gray-500 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 inline-block mr-1 mb-1">
-                            {dsId}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  {item.agentFiles && item.agentFiles.length > 0 && (
-                    <div>
-                      <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
-                        <span className="text-blue-500">📄</span> Knowledge Files:
-                      </h4>
-                      <ul className="space-y-1 text-xs text-gray-600">
-                        {item.agentFiles.map((fileName, fIdx) => (
-                          <li key={fIdx} className="text-gray-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 inline-block mr-1 mb-1">
-                            {fileName}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  {item.unmappedDatastores && item.unmappedDatastores.length > 0 ? (
-                    <div>
-                      <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
-                        <span className="text-red-500">📦</span> Unmapped Datastores (Action Required):
-                      </h4>
-                      <ul className="space-y-1 text-xs text-gray-600">
-                        {item.unmappedDatastores.map((dsId, dsIdx) => (
-                          <li key={dsIdx} className="font-mono text-gray-500 bg-red-50 px-1.5 py-0.5 rounded border border-red-100 inline-block mr-1 mb-1">
-                            {dsId}
-                          </li>
-                        ))}
-                      </ul>
-                      <p className="text-[10px] text-red-500 mt-1">
-                        These datastores were not able to be remapped to new datastores and will need to be reviewed and manually re-added.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="text-xs text-gray-500 flex items-center gap-1">
-                      <span className="text-green-500">📦</span> All datastores successfully mapped or none attached.
-                    </div>
-                  )}
-                </>
-              ) : (
-                <>
-                  <div className="text-xs text-gray-600 dark:text-white">
-                    <p className="font-medium text-blue-700 dark:text-white bg-blue-50 dark:bg-blue-900 p-2 rounded-lg border border-blue-100 dark:border-blue-800">
-                      ℹ️ Notebook restored. Please check sources and sharing.
-                    </p>
+        {/* Step 2: Update Agent Configurations */}
+        {restoredAgents.length > 0 && (
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm space-y-3">
+            <h3 className="text-sm font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-2">
+              <span className="flex items-center justify-center w-5 h-5 rounded-full bg-indigo-100 text-indigo-600 text-[10px] font-bold">2</span>
+              Step 2: Update Agent Configurations
+            </h3>
+            <p className="text-gray-500 text-[11px]">
+              Verify and update configuration settings for the restored agents to ensure proper functioning.
+            </p>
+            <div className="space-y-2 pt-1">
+              {restoredAgents.map((agent, idx) => (
+                <div key={idx} className="flex items-start gap-2 bg-gray-50 dark:bg-slate-800 p-2 rounded-lg border border-gray-100 dark:border-slate-700">
+                  <input type="checkbox" className="mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer" />
+                  <div>
+                    <p className="font-semibold text-gray-900 dark:text-white">Verify Config for Agent: "{agent.agentName}"</p>
+                    <p className="text-[10px] text-gray-500">Check and update the system instructions, model, and tool parameters.</p>
                   </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
-                  {item.sharedWith && item.sharedWith.length > 0 ? (
+        {/* Step 3: Add Missing Files */}
+        {(step3AgentItems.length > 0 || step3NotebookItems.length > 0) && (
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm space-y-3">
+            <h3 className="text-sm font-bold text-amber-600 dark:text-amber-400 flex items-center gap-2">
+              <span className="flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-600 text-[10px] font-bold">3</span>
+              Step 3: Add Missing Files & Binds
+            </h3>
+            <p className="text-gray-500 text-[11px]">
+              Re-upload local knowledge files and verify datastore mappings that could not be automatically resolved.
+            </p>
+            <div className="space-y-2 pt-1">
+              {step3AgentItems.map((agent, idx) => (
+                <div key={idx} className="bg-gray-50 dark:bg-slate-800 p-3 rounded-lg border border-gray-100 dark:border-slate-700 space-y-2">
+                  <div className="flex items-start gap-2">
+                    <input type="checkbox" className="mt-0.5 rounded border-gray-300 text-amber-600 focus:ring-amber-500 cursor-pointer" />
                     <div>
-                      <h4 className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
-                        <span className="text-purple-500">👥</span> Reshare with:
-                      </h4>
-                      <div className="flex flex-wrap gap-1">
-                        {item.sharedWith.map((user, uidx) => (
-                          <span key={uidx} className="px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded text-[10px] font-medium">
-                            {user}
-                          </span>
-                        ))}
+                      <p className="font-semibold text-gray-900 dark:text-white">Restore knowledge links for Agent: "{agent.agentName}"</p>
+                    </div>
+                  </div>
+                  <div className="pl-6 space-y-2">
+                    {agent.unmappedDatastores && agent.unmappedDatastores.length > 0 && (
+                      <div>
+                        <p className="font-semibold text-[10px] text-red-600 mb-0.5">Unmapped Datastores (Action Required):</p>
+                        <div className="flex flex-wrap gap-1">
+                          {agent.unmappedDatastores.map((dsId, dsIdx) => (
+                            <span key={dsIdx} className="px-1.5 py-0.5 bg-red-50 text-red-700 rounded text-[10px] font-mono font-medium">
+                              {dsId}
+                            </span>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  ) : (
-                    <div>
-                      <h4 className="text-xs font-semibold text-gray-700 dark:text-white mb-1 flex items-center gap-1">
-                        <span className="text-purple-500">👥</span> Sharing:
-                      </h4>
-                      <p className="text-xs text-gray-600 dark:text-white">
-                        We are unable to retrieve shared users from source. Please manually document and reshare your notebooks if needed.
-                      </p>
-                    </div>
-                  )}
+                    )}
+                    {agent.agentFiles && agent.agentFiles.length > 0 && (
+                      <div>
+                        <p className="font-semibold text-[10px] text-amber-700 mb-0.5">Missing Knowledge Files:</p>
+                        <div className="flex flex-wrap gap-1">
+                          {agent.agentFiles.map((fileName, fIdx) => (
+                            <span key={fIdx} className="px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded text-[10px] font-medium">
+                              {fileName}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
 
-                  {item.localFiles && item.localFiles.length > 0 ? (
+              {step3NotebookItems.map((nb, idx) => (
+                <div key={idx} className="bg-gray-50 dark:bg-slate-800 p-3 rounded-lg border border-gray-100 dark:border-slate-700 space-y-2">
+                  <div className="flex items-start gap-2">
+                    <input type="checkbox" className="mt-0.5 rounded border-gray-300 text-amber-600 focus:ring-amber-500 cursor-pointer" />
                     <div>
-                      <h4 className="text-xs font-semibold text-gray-700 dark:text-white mb-1 flex items-center gap-1">
-                        <span className="text-yellow-500">📁</span> Local Files (Action Required):
-                      </h4>
-                      <p className="text-xs text-gray-600 dark:text-white mb-1">
-                        The following local files were attached to the original notebook and need to be re-added manually:
-                      </p>
-                      <ul className="space-y-1 text-xs text-gray-600 dark:text-white">
-                        {item.localFiles.map((file, fIdx) => (
-                          <li key={fIdx} className="text-gray-700 dark:text-white bg-yellow-50 dark:bg-slate-900 px-1.5 py-0.5 rounded border border-yellow-100 dark:border-slate-700 inline-block mr-1 mb-1">
-                            {file}
-                          </li>
-                        ))}
-                      </ul>
+                      <p className="font-semibold text-gray-900 dark:text-white">Re-upload missing files for Notebook: "{nb.notebookTitle}"</p>
                     </div>
-                  ) : (
-                    <div className="text-xs text-gray-500 flex items-center gap-1">
-                      <span className="text-yellow-300">📁</span> No local files detected or all sources are external.
-                    </div>
-                  )}
-                </>
-              )}
+                  </div>
+                  <div className="pl-6 font-mono text-gray-500">
+                    {nb.localFiles && nb.localFiles.length > 0 && (
+                      <div>
+                        <p className="font-semibold text-[10px] text-amber-700 mb-0.5">Local Files to re-upload:</p>
+                        <div className="flex flex-wrap gap-1">
+                          {nb.localFiles.map((file, fIdx) => (
+                            <span key={fIdx} className="px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded text-[10px] font-medium font-sans">
+                              {file}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
+          </div>
+        )}
 
-          {manualActionReport.length === 0 && (
-            <div className="text-center py-4 text-gray-500 text-sm">
-              No manual steps required! All items were successfully restored.
+        {/* Step 4: Sharing */}
+        {(step4AgentItems.length > 0 || step4NotebookItems.length > 0) && (
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm space-y-3">
+            <h3 className="text-sm font-bold text-purple-600 dark:text-purple-400 flex items-center gap-2">
+              <span className="flex items-center justify-center w-5 h-5 rounded-full bg-purple-100 text-purple-600 text-[10px] font-bold">4</span>
+              Step 4: Share & Restore Permissions
+            </h3>
+            <p className="text-gray-500 text-[11px]">
+              Reshare the restored items with the appropriate team members or groups.
+            </p>
+            <div className="space-y-2 pt-1">
+              {step4AgentItems.map((agent, idx) => (
+                <div key={idx} className="bg-gray-50 dark:bg-slate-800 p-3 rounded-lg border border-gray-100 dark:border-slate-700 space-y-2">
+                  <div className="flex items-start gap-2">
+                    <input type="checkbox" className="mt-0.5 rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer" />
+                    <div>
+                      <p className="font-semibold text-gray-900 dark:text-white">Share Agent: "{agent.agentName}"</p>
+                    </div>
+                  </div>
+                  <div className="pl-6">
+                    {agent.sharedWith && agent.sharedWith.length > 0 ? (
+                      <div>
+                        <p className="font-semibold text-[10px] text-purple-700 mb-1">Share with the following users:</p>
+                        <div className="flex flex-wrap gap-1">
+                          {agent.sharedWith.map((user, uidx) => (
+                            <span key={uidx} className="px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded text-[10px] font-medium">
+                              {user}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-gray-400">No sharing permissions found in backup.</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              {step4NotebookItems.map((nb, idx) => (
+                <div key={idx} className="bg-gray-50 dark:bg-slate-800 p-3 rounded-lg border border-gray-100 dark:border-slate-700 space-y-2">
+                  <div className="flex items-start gap-2">
+                    <input type="checkbox" className="mt-0.5 rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer" />
+                    <div>
+                      <p className="font-semibold text-gray-900 dark:text-white">Share Notebook: "{nb.notebookTitle}"</p>
+                    </div>
+                  </div>
+                  <div className="pl-6">
+                    {nb.sharedWith && nb.sharedWith.length > 0 ? (
+                      <div>
+                        <p className="font-semibold text-[10px] text-purple-700 mb-1">Share with the following users:</p>
+                        <div className="flex flex-wrap gap-1">
+                          {nb.sharedWith.map((user, uidx) => (
+                            <span key={uidx} className="px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded text-[10px] font-medium">
+                              {user}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-gray-400">We are unable to retrieve shared users from source. Please manually document and reshare your notebooks if needed.</p>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
-          )}
-        </div>
-        
+          </div>
+        )}
+
+        {manualActionReport.length === 0 && (
+          <div className="text-center py-4 text-gray-500 text-sm">
+            No manual steps required! All items were successfully restored.
+          </div>
+        )}
+
         <div className="mt-4">
           <button
-            onClick={downloadStepsAsText}
-            className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center justify-center gap-2"
+            onClick={downloadStepsAsDocx}
+            className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center justify-center gap-2 cursor-pointer font-sans"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
-            Download Steps
+            Download DOCX Checklist
           </button>
         </div>
       </div>
@@ -3045,8 +3574,8 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               </div>
 
               {/* Migration Scope / Security Options */}
-              <div className="border-t border-gray-100 pt-4">
-                <h3 className="text-sm font-semibold text-gray-700 mb-2">Migration Scope / WIF Access Control</h3>
+              <div className="border-t border-gray-100 pt-4 space-y-4">
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">Migration Scope & Agent View Settings</h3>
                 <div className="flex items-start gap-2">
                   <input 
                     type="checkbox" 
@@ -3061,6 +3590,24 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                     </label>
                     <p className="text-xs text-gray-400 mt-1">
                       Check this if the selected source Engine represents a personal or single-user workspace app. Bypassing individual owner check ensures default agents (e.g., HR-Advisory2) and shared assets are correctly migrated.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2 border-t border-gray-50 pt-3">
+                  <input 
+                    type="checkbox" 
+                    id="enableAgentViewFallback"
+                    checked={!!userTabConfig.enableAgentViewFallback} 
+                    onChange={(e) => setUserTabConfig(prev => ({ ...prev, enableAgentViewFallback: e.target.checked }))} 
+                    className="mt-1 w-4 h-4 rounded text-indigo-600 border-gray-300 focus:ring-indigo-500"
+                  />
+                  <div>
+                    <label htmlFor="enableAgentViewFallback" className="text-sm font-medium text-gray-700 cursor-pointer select-none">
+                      Enable Agent View Fallback
+                    </label>
+                    <p className="text-xs text-gray-400 mt-1">
+                      When enabled, if the main Agent View API fails (e.g., due to workforce pool permissions), the application will fall back to structural check and IAM policy queries to classify low-code agents and verify ownership.
                     </p>
                   </div>
                 </div>
@@ -3723,9 +4270,9 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             )}
 
             {/* Migration Settings */}
-            <div className="bg-gray-50 dark:bg-slate-700 p-4 rounded-lg border border-gray-200 dark:border-slate-600">
+            <div className="bg-gray-50 dark:bg-slate-700 p-4 rounded-lg border border-gray-200 dark:border-slate-600 space-y-4">
               <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-3">Migration Settings</h3>
-              <div className="flex gap-4">
+              <div className="flex gap-4 pb-3 border-b border-gray-200 dark:border-slate-600">
                 <div className="flex items-center gap-2">
                   <input 
                     type="checkbox" 
@@ -3749,6 +4296,50 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                   <label htmlFor="migrateNotebooks" className="text-xs text-gray-700 dark:text-white font-medium cursor-pointer">
                     Migrate Notebooks
                   </label>
+                </div>
+              </div>
+
+              <div className="space-y-3 pt-1">
+                <div className="flex items-start gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="adminBypassOwnerFilter" 
+                    checked={!!userTabConfig.bypassOwnerFilter} 
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setUserTabConfig(prev => ({ ...prev, bypassOwnerFilter: checked }));
+                    }}
+                    className="mt-0.5 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
+                  />
+                  <div>
+                    <label htmlFor="adminBypassOwnerFilter" className="text-xs text-gray-700 dark:text-white font-semibold cursor-pointer select-none">
+                      Bypass user WIF owner filter (Migrate all agents in context)
+                    </label>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      Ensures default workspace agents and shared assets are migrated without restriction.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="adminEnableAgentViewFallback" 
+                    checked={!!userTabConfig.enableAgentViewFallback} 
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setUserTabConfig(prev => ({ ...prev, enableAgentViewFallback: checked }));
+                    }}
+                    className="mt-0.5 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
+                  />
+                  <div>
+                    <label htmlFor="adminEnableAgentViewFallback" className="text-xs text-gray-700 dark:text-white font-semibold cursor-pointer select-none">
+                      Enable Agent View Fallback (structural check & IAM policy fallback)
+                    </label>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      Falls back to structural detection and IAM queries if getAgentView returns a permission failure.
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
