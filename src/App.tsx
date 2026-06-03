@@ -24,7 +24,7 @@ function App() {
     return saved ? JSON.parse(saved) : {
       idpChangeEnabled: import.meta.env.VITE_IDP_CHANGE_ENABLED === 'true',
       enableGoogleIdp: import.meta.env.VITE_ENABLE_GOOGLE_IDP !== 'false',
-      enableWifIdp: import.meta.env.VITE_ENABLE_WIF_IDP === 'true',
+      enableWifIdp: import.meta.env.VITE_ENABLE_WIF_IDP !== 'false'
     };
   });
 
