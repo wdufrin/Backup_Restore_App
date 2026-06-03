@@ -176,6 +176,33 @@ const isAgentOwnedByUser = (agent: any, userEmail: string, userSub: string, pool
   return false;
 };
 
+const isMemberCurrentUser = (member: string, userEmail: string, userSub: string, poolId?: string): boolean => {
+  const owner = getOwnerFromBinding(member);
+  
+  // 1. Direct email match
+  if (userEmail && (owner === userEmail || member.includes(userEmail))) return true;
+  
+  // 2. Direct subject match
+  if (userSub && (owner === userSub || member.includes(userSub))) return true;
+  
+  // 3. Full WIF principal match
+  if (poolId && userSub) {
+    const wifPrincipal = `principal://iam.googleapis.com/locations/global/workforcePools/${poolId}/subject/${userSub}`;
+    if (member === wifPrincipal) return true;
+  }
+  
+  // 4. Smart prefix-based match (e.g., matching Google user 'wdufrin' with WIF principal 'admin@wdufrin.allostrat.com')
+  if (userEmail) {
+    const prefix = userEmail.split('@')[0].toLowerCase();
+    if (prefix && prefix.length > 2) {
+      if (owner.toLowerCase().includes(prefix)) return true;
+      if (member.toLowerCase().includes(prefix)) return true;
+    }
+  }
+  
+  return false;
+};
+
 // --- Main Page Component ---
 
 const BackupPage: React.FC<BackupPageProps> = ({ 
@@ -1977,7 +2004,8 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               }
               if (binding.members) {
                 const filteredMembers = binding.members.filter((member: string) => {
-                  return !userEmail || !member.includes(userEmail);
+                  return !isMemberCurrentUser(member, userEmail || '', userSub || '', poolId) &&
+                         (!pendingBackupData?.userEmail || !isMemberCurrentUser(member, pendingBackupData.userEmail, '', poolId));
                 });
                 sharedWith.push(...filteredMembers);
               }
@@ -2041,7 +2069,8 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               }
               if (binding.members) {
                 const filteredMembers = binding.members.filter((member: string) => {
-                  return !userEmail || !member.includes(userEmail);
+                  return !isMemberCurrentUser(member, userEmail || '', userSub || '', poolId) &&
+                         (!pendingBackupData?.userEmail || !isMemberCurrentUser(member, pendingBackupData.userEmail, '', poolId));
                 });
                 sharedWith.push(...filteredMembers);
               }
@@ -2351,7 +2380,10 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
     }
 
     // Step 4: Sharing
-    if (restoredAgents.length > 0 || restoredNotebooks.length > 0) {
+    const step4AgentItems = restoredAgents.filter(item => item.sharedWith && item.sharedWith.length > 0);
+    const step4NotebookItems = restoredNotebooks.filter(item => item.sharedWith && item.sharedWith.length > 0);
+
+    if (step4AgentItems.length > 0 || step4NotebookItems.length > 0) {
       children.push(
         new Paragraph({
           heading: HeadingLevel.HEADING_1,
@@ -2379,7 +2411,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
         })
       );
 
-      restoredAgents.forEach(agent => {
+      step4AgentItems.forEach(agent => {
         children.push(
           new Paragraph({
             children: [
@@ -2414,24 +2446,10 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               spacing: { after: 40 },
             })
           );
-        } else {
-          children.push(
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: "     * No sharing permissions found in backup.",
-                  size: 20,
-                  color: "718096",
-                  font: "Calibri",
-                }),
-              ],
-              spacing: { after: 40 },
-            })
-          );
         }
       });
 
-      restoredNotebooks.forEach(nb => {
+      step4NotebookItems.forEach(nb => {
         children.push(
           new Paragraph({
             children: [
@@ -2460,20 +2478,6 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                   text: "     * Share with: " + nb.sharedWith.join(", "),
                   size: 20,
                   color: "6B46C1",
-                  font: "Calibri",
-                }),
-              ],
-              spacing: { after: 40 },
-            })
-          );
-        } else {
-          children.push(
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: "     * We are unable to retrieve shared users from source. Please manually document and reshare if needed.",
-                  size: 20,
-                  color: "718096",
                   font: "Calibri",
                 }),
               ],
@@ -3137,9 +3141,9 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
       item.localFiles && item.localFiles.length > 0
     );
 
-    // Step 4 items
-    const step4AgentItems = restoredAgents;
-    const step4NotebookItems = restoredNotebooks;
+    // Step 4 items: only show items that are shared with at least one user
+    const step4AgentItems = restoredAgents.filter(item => item.sharedWith && item.sharedWith.length > 0);
+    const step4NotebookItems = restoredNotebooks.filter(item => item.sharedWith && item.sharedWith.length > 0);
 
     return (
       <div className="space-y-6 text-xs text-gray-800 dark:text-gray-200">
