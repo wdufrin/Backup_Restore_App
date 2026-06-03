@@ -46,8 +46,8 @@ While this tool simplifies the migration process, please be aware of the followi
 ### For Workforce Identity Federation (Entra ID / Okta)
 To allow users logging in via Workforce Identity Federation to use the self-service backup and restore features without granting them full project administrator rights, you must create a custom IAM role and assign it to them.
 
-#### 1. Create Custom Role
-Create a custom role named `customBackupViewer` at the project level with the following permissions:
+#### 1. Create Custom Role in Source Project
+Create a custom role named `customBackupViewer` at the project level in the source project with the following permissions:
 - **`discoveryengine.engines.list`** & **`discoveryengine.engines.get`**: To list and read search engine configurations in the environment.
 - **`discoveryengine.assistants.list`** & **`discoveryengine.assistants.get`**: To discover assistants and retrieve persona instructions or web search configs.
 - **`discoveryengine.agents.list`** & **`discoveryengine.agents.get`**: To list and extract full agent definitions (JSON configs) for backups.
