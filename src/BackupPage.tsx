@@ -110,6 +110,55 @@ const getOwnerFromBinding = (member: string): string => {
   }
 };
 
+const areAgentDefinitionsEquivalent = (agentA: any, agentB: any): boolean => {
+  if ((agentA.description || '').trim() !== (agentB.description || '').trim()) return false;
+
+  const getInstructionsText = (agent: any): string => {
+    if (agent.adkAgentDefinition?.toolSettings?.toolDescription) {
+      return agent.adkAgentDefinition.toolSettings.toolDescription;
+    }
+    if (agent.lowCodeAgentDefinition) {
+      const lowCodeDef = agent.lowCodeAgentDefinition;
+      return lowCodeDef.systemInstruction?.additionalSystemInstruction || 
+             lowCodeDef.systemInstruction || 
+             lowCodeDef.instruction || 
+             lowCodeDef.instructions || 
+             (typeof lowCodeDef === 'string' ? lowCodeDef : JSON.stringify(lowCodeDef));
+    }
+    if (agent.a2aAgentDefinition?.jsonAgentCard) {
+      return agent.a2aAgentDefinition.jsonAgentCard;
+    }
+    const definitionKeys = Object.keys(agent).filter(key => key.toLowerCase().includes('agentdefinition'));
+    for (const key of definitionKeys) {
+      const def = agent[key];
+      if (def) {
+        if (typeof def === 'string') return def;
+        if (def.systemInstruction) return typeof def.systemInstruction === 'string' ? def.systemInstruction : JSON.stringify(def.systemInstruction);
+        if (def.instruction) return typeof def.instruction === 'string' ? def.instruction : JSON.stringify(def.instruction);
+        if (def.instructions) return typeof def.instructions === 'string' ? def.instructions : JSON.stringify(def.instructions);
+        return JSON.stringify(def);
+      }
+    }
+    return '';
+  };
+
+  const instA = getInstructionsText(agentA);
+  const instB = getInstructionsText(agentB);
+
+  const sanitize = (str: string): string => {
+    if (!str) return '';
+    let s = str.trim().toLowerCase();
+    s = s.replace(/projects\/[^/]+/g, 'projects/PROJECT_PLACEHOLDER');
+    s = s.replace(/locations\/[^/]+/g, 'locations/LOCATION_PLACEHOLDER');
+    s = s.replace(/collections\/[^/]+/g, 'collections/COLLECTION_PLACEHOLDER');
+    s = s.replace(/dataStores\/[^/]+/g, 'dataStores/DATASTORE_PLACEHOLDER');
+    s = s.replace(/engines\/[^/]+/g, 'engines/ENGINE_PLACEHOLDER');
+    return s;
+  };
+
+  return sanitize(instA) === sanitize(instB);
+};
+
 const isAgentOwnedByUser = (agent: any, userEmail: string, userSub: string, poolId?: string): boolean => {
   let owner = "N/A";
   let fullMember = "";
@@ -1581,6 +1630,35 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
       accessToken: sourceToken || accessToken,
     };
 
+    const targetConfig = {
+      ...apiConfig,
+      projectId: userTabConfig.targetProject,
+      appLocation: userTabConfig.targetLocation || apiConfig.appLocation,
+      appId: userTabConfig.targetAppId || apiConfig.appId,
+      accessToken: targetToken || accessToken,
+    };
+
+    addLog(`Fetching target resources for migration validation...`);
+    const targetAgents: Agent[] = [];
+    let targetPageToken: string | undefined = undefined;
+    try {
+      do {
+        const agentsResponse = await api.listResources('agents', targetConfig, targetPageToken);
+        targetAgents.push(...(agentsResponse.agents || []));
+        targetPageToken = agentsResponse.nextPageToken;
+      } while (targetPageToken);
+    } catch (err: any) {
+      addLog(`Warning: Failed to fetch target agents for validation: ${err.message}`);
+    }
+
+    let targetNotebooks: any[] = [];
+    try {
+      const response = await api.listNotebooks(targetConfig);
+      targetNotebooks = response.notebooks || [];
+    } catch (err: any) {
+      addLog(`Warning: Failed to fetch target notebooks for validation: ${err.message}`);
+    }
+
     if (isDebugMode) {
       addLog(`[DEBUG] Exchanged WIF Access Token (for terminal curls):`);
       addLog(sourceConfig.accessToken || "Token not resolved");
@@ -1680,10 +1758,51 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
 
         // Only show WIF user-owned agents OR shared/unowned agents (no explicit owner)
         if (isOwned || !hasOwner) {
+          const collidingAgent = targetAgents.find(ta => {
+            const taName = ta.displayName.replace('[Replace] ', '').trim().toLowerCase();
+            const bkName = agent.displayName.replace('[Replace] ', '').trim().toLowerCase();
+            return taName === bkName;
+          });
+
+          let disabled = false;
+          let disabledReason: string | undefined = undefined;
+
+          if (collidingAgent) {
+            let collidingAgentWithView = collidingAgent;
+            try {
+              addLog(`  - Fetching target agent view for duplicate check on: ${collidingAgent.displayName}...`);
+              const rawViewResponse = await api.getAgentView(collidingAgent.name, targetConfig);
+              const targetAgentView = rawViewResponse?.agentView || rawViewResponse;
+              collidingAgentWithView = {
+                ...collidingAgent,
+                ...targetAgentView
+              };
+            } catch (viewErr: any) {
+              addLog(`    - Warning: Failed to fetch target agent view: ${viewErr.message}. Fallback to basic details.`);
+            }
+
+            const isTargetOwned = isAgentOwnedByUser(collidingAgentWithView, userEmail, userSub, poolId);
+            if (isTargetOwned) {
+              const equivalent = areAgentDefinitionsEquivalent(collidingAgentWithView, enrichedAgent);
+              if (equivalent) {
+                disabled = true;
+                disabledReason = 'Already restored (same name, description & instructions)';
+              } else {
+                disabled = true;
+                disabledReason = 'Name conflict in target (different configuration exists)';
+              }
+            } else {
+              disabled = false;
+              disabledReason = undefined;
+            }
+          }
+
           selectableAgents.push({
             name: agent.name,
             displayName: agent.displayName,
             agentType: 'Low Code',
+            disabled,
+            disabledReason,
             category: isOwned ? 'core' : 'optional'
           });
         }
@@ -1706,9 +1825,10 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           // 2. IAM Policy Owner Check
           let isOwned = false;
           let hasOwner = false;
+          let agentWithPolicy: any = { ...agent };
           try {
             const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
-            const agentWithPolicy = { ...agent, iamPolicy: policy };
+            agentWithPolicy = { ...agent, iamPolicy: policy };
             
             isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId);
             
@@ -1727,10 +1847,51 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
 
           // Only show WIF user-owned agents OR shared/unowned agents (no explicit owner)
           if (isOwned || !hasOwner) {
+             const collidingAgent = targetAgents.find(ta => {
+               const taName = ta.displayName.replace('[Replace] ', '').trim().toLowerCase();
+               const bkName = agent.displayName.replace('[Replace] ', '').trim().toLowerCase();
+               return taName === bkName;
+             });
+
+             let disabled = false;
+             let disabledReason: string | undefined = undefined;
+
+             if (collidingAgent) {
+               let collidingAgentWithView = collidingAgent;
+               try {
+                 addLog(`  - Fetching target agent view for duplicate check on (fallback path): ${collidingAgent.displayName}...`);
+                 const rawViewResponse = await api.getAgentView(collidingAgent.name, targetConfig);
+                 const targetAgentView = rawViewResponse?.agentView || rawViewResponse;
+                 collidingAgentWithView = {
+                   ...collidingAgent,
+                   ...targetAgentView
+                 };
+               } catch (viewErr: any) {
+                 addLog(`    - Warning: Failed to fetch target agent view: ${viewErr.message}. Fallback to basic details.`);
+               }
+
+               const isTargetOwned = isAgentOwnedByUser(collidingAgentWithView, userEmail, userSub, poolId);
+               if (isTargetOwned) {
+                 const equivalent = areAgentDefinitionsEquivalent(collidingAgentWithView, agentWithPolicy);
+                 if (equivalent) {
+                   disabled = true;
+                   disabledReason = 'Already restored (same name, description & instructions)';
+                 } else {
+                   disabled = true;
+                   disabledReason = 'Name conflict in target (different configuration exists)';
+                 }
+               } else {
+                 disabled = false;
+                 disabledReason = undefined;
+               }
+             }
+
             selectableAgents.push({
               name: agent.name,
               displayName: agent.displayName,
               agentType: 'Low Code',
+              disabled,
+              disabledReason,
               category: isOwned ? 'core' : 'optional'
             });
           }
@@ -1764,10 +1925,17 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
         fullBackupNotebooks.push(rawNotebook);
 
         const isOwned = rawNotebook.metadata?.userRole === 'PROJECT_ROLE_OWNER';
+        
+        const cleanTitle = rawNotebook.title || rawNotebook.displayName || 'Restored Notebook';
+        const targetTitle = cleanTitle.endsWith(' (Restored)') ? cleanTitle : `${cleanTitle} (Restored)`;
+        const exists = targetNotebooks.some(n => n.title === cleanTitle || n.title === targetTitle);
+
         selectableNotebooks.push({
           name: rawNotebook.name,
-          displayName: rawNotebook.displayName || rawNotebook.title || rawNotebook.name.split('/').pop() || 'Unnamed Notebook',
+          displayName: cleanTitle,
           agentType: 'Notebook',
+          disabled: exists,
+          disabledReason: exists ? 'Already exists in target' : undefined,
           category: isOwned ? 'core' : 'optional'
         });
       } catch (nbErr: any) {
@@ -1808,6 +1976,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
       projectId: userTabConfig.targetProject,
       appLocation: userTabConfig.targetLocation || apiConfig.appLocation,
       appId: userTabConfig.targetAppId || apiConfig.appId,
+      accessToken: targetToken || accessToken,
     };
 
     if (isDebugMode) {
@@ -1848,20 +2017,58 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
         addLog(`  - Warning: Failed to fetch target notebooks for validation: ${err.message}`);
       }
 
-      const targetAgentNames = new Set(targetAgents.map(a => a.displayName));
       const targetNotebookTitles = new Set(targetNotebooks.map(n => n.title));
 
-      const agentItems: SelectableItem[] = (backupData.agents || []).map((agent: any) => {
-        const exists = targetAgentNames.has(agent.displayName);
-        return {
+      const agentItems: SelectableItem[] = [];
+      for (const agent of (backupData.agents || [])) {
+        const collidingAgent = targetAgents.find(ta => {
+          const taName = ta.displayName.replace('[Replace] ', '').trim().toLowerCase();
+          const bkName = agent.displayName.replace('[Replace] ', '').trim().toLowerCase();
+          return taName === bkName;
+        });
+
+        let disabled = false;
+        let disabledReason: string | undefined = undefined;
+
+        if (collidingAgent) {
+          let collidingAgentWithView = collidingAgent;
+          try {
+            addLog(`  - Fetching target agent view for duplicate check on: ${collidingAgent.displayName}...`);
+            const rawViewResponse = await api.getAgentView(collidingAgent.name, targetConfig);
+            const targetAgentView = rawViewResponse?.agentView || rawViewResponse;
+            collidingAgentWithView = {
+              ...collidingAgent,
+              ...targetAgentView
+            };
+          } catch (viewErr: any) {
+            addLog(`    - Warning: Failed to fetch target agent view: ${viewErr.message}. Fallback to basic details.`);
+          }
+
+          const isTargetOwned = isAgentOwnedByUser(collidingAgentWithView, userEmail, userSub, poolId);
+          if (isTargetOwned) {
+            const equivalent = areAgentDefinitionsEquivalent(collidingAgentWithView, agent);
+            if (equivalent) {
+              disabled = true;
+              disabledReason = 'Already restored (same name, description & instructions)';
+            } else {
+              disabled = true;
+              disabledReason = 'Name conflict in target (different configuration exists)';
+            }
+          } else {
+            disabled = false;
+            disabledReason = undefined;
+          }
+        }
+
+        agentItems.push({
           name: agent.name,
           displayName: agent.displayName || 'Unnamed Agent',
           agentType: agent.agentType || 'Low Code',
-          disabled: exists,
-          disabledReason: exists ? 'Already exists in target' : undefined,
+          disabled,
+          disabledReason,
           category: agent.category
-        };
-      });
+        });
+      }
 
       const notebookItems: SelectableItem[] = (backupData.notebooks || []).map((nb: any) => {
         const cleanTitle = nb.title || 'Restored Notebook';
@@ -2806,29 +3013,15 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
 
       let createPayload = buildPayload(agent);
       
-      // Check for existing agent to prevent duplicates
-      const cleanDisplayName = agent.displayName.replace('[Replace] ', '');
-      const existingAgent = existingAgents.find(a => a.displayName === cleanDisplayName || a.displayName === agent.displayName);
-
       try {
         let targetAgentName = "";
         let targetAgentId = "";
 
-        if (existingAgent) {
-          targetAgentName = existingAgent.name;
-          targetAgentId = targetAgentName.split('/').pop()!;
-          addLog(`      - EXISTS: Agent with name '${existingAgent.displayName}' already exists. Overwriting/updating configuration in-place...`);
-          
-          // Update the existing agent
-          await api.updateAgent(existingAgent, createPayload, restoreConfig);
-          addLog(`      - UPDATED: Agent '${agent.displayName}' updated successfully.`);
-        } else {
-          const targetId = (agent as any).targetId;
-          const newAgent = await api.createAgent(createPayload, restoreConfig, targetId);
-          targetAgentName = newAgent.name;
-          targetAgentId = targetAgentName.split('/').pop()!;
-          addLog(`      - CREATED: Agent '${agent.displayName}' created successfully with new ID '${targetAgentId}'.`);
-        }
+        const targetId = (agent as any).targetId;
+        const newAgent = await api.createAgent(createPayload, restoreConfig, targetId);
+        targetAgentName = newAgent.name;
+        targetAgentId = targetAgentName.split('/').pop()!;
+        addLog(`      - CREATED: Agent '${agent.displayName}' created successfully with new ID '${targetAgentId}'.`);
 
 
 
