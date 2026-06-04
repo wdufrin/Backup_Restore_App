@@ -1228,7 +1228,8 @@ discoveryengine.agents.get,\\
 discoveryengine.agents.manage,\\
 discoveryengine.agents.getIamPolicy,\\
 discoveryengine.notebooks.list,\\
-discoveryengine.notebooks.get" \\
+discoveryengine.notebooks.get,\\
+serviceusage.services.use" \\
     --stage=GA
 
 Step 2: Assign the role to your user (Dynamic based on your login):
