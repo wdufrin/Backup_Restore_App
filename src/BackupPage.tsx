@@ -2859,13 +2859,26 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
 
         // Rewrite DataStore connections based on mapping
         if (payload.dataStoreConnections) {
-          const rewrittenConnections = payload.dataStoreConnections.map((conn: any) => {
+          const rewrittenConnections = [];
+          for (const conn of payload.dataStoreConnections) {
             if (conn.dataStore) {
               const parts = conn.dataStore.split('/');
               const colIndex = parts.indexOf('collections');
               const oldColId = colIndex !== -1 ? parts[colIndex + 1] : 'default_collection';
-              
               const oldDsId = conn.dataStore.split('/').pop();
+              
+              if (!oldDsId) {
+                rewrittenConnections.push(conn);
+                continue;
+              }
+
+              // Check if the datastore is mapped to a valid target ID.
+              // If it's not mapped (or mapped to empty string ""), we skip it!
+              const mappedTargetId = datastoreMapping[oldDsId];
+              if (mappedTargetId === undefined || mappedTargetId === '') {
+                addLog(`    - Warning: Datastore '${oldDsId}' is not mapped to a target datastore. Skipping this connection for restored agent.`);
+                continue;
+              }
               
               const targetProject = restoreConfig.projectId;
               const targetLocation = restoreConfig.appLocation || 'global';
@@ -2878,21 +2891,14 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                 }
               }
               
-              let newDsId = oldDsId;
-              if (oldDsId && datastoreMapping[oldDsId]) {
-                newDsId = datastoreMapping[oldDsId];
-                if (isDebugMode) {
-                  addLog(`    - [DEBUG] Root Connection: Remapping datastore ${oldDsId} -> ${newDsId}`);
-                }
-              }
-              
-              return {
+              rewrittenConnections.push({
                 ...conn,
-                dataStore: `projects/${targetProject}/locations/${targetLocation}/collections/${targetCollection}/dataStores/${newDsId}`
-              };
+                dataStore: `projects/${targetProject}/locations/${targetLocation}/collections/${targetCollection}/dataStores/${mappedTargetId}`
+              });
+            } else {
+              rewrittenConnections.push(conn);
             }
-            return conn;
-          });
+          }
 
           // Deduplicate based on dataStore path
           const seenDataStores = new Set<string>();
@@ -2987,7 +2993,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             Object.entries(datastoreMapping)
               .sort((a, b) => b[0].length - a[0].length)
               .forEach(([oldDsId, newDsId]) => {
-                if (defStr.includes(`/dataStores/${oldDsId}`)) {
+                if (newDsId && defStr.includes(`/dataStores/${oldDsId}`)) {
                   if (isDebugMode) {
                     addLog(`    - [DEBUG] Remapping datastore in definition: ${oldDsId} -> ${newDsId}`);
                   }
@@ -3039,8 +3045,19 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                 return b;
               });
               
+              // Merge current target bindings (to preserve the new owner) with mapped backup bindings
+              const mergedBindings = currentPolicy.bindings ? [...currentPolicy.bindings] : [];
+              mappedBindings.forEach((backupBinding: any) => {
+                const existingBinding = mergedBindings.find((b: any) => b.role === backupBinding.role);
+                if (existingBinding) {
+                  existingBinding.members = Array.from(new Set([...(existingBinding.members || []), ...(backupBinding.members || [])]));
+                } else {
+                  mergedBindings.push(backupBinding);
+                }
+              });
+
               const payloadPolicy = { 
-                bindings: mappedBindings,
+                bindings: mergedBindings,
                 etag: currentPolicy.etag
               };
               await api.setAgentIamPolicy(targetAgentName, payloadPolicy, restoreConfig, true);
@@ -3119,8 +3136,19 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                     return b;
                   });
 
+                  // Merge current target bindings (to preserve the new owner) with mapped backup bindings
+                  const mergedBindings = currentPolicy.bindings ? [...currentPolicy.bindings] : [];
+                  mappedBindings.forEach((backupBinding: any) => {
+                    const existingBinding = mergedBindings.find((b: any) => b.role === backupBinding.role);
+                    if (existingBinding) {
+                      existingBinding.members = Array.from(new Set([...(existingBinding.members || []), ...(backupBinding.members || [])]));
+                    } else {
+                      mergedBindings.push(backupBinding);
+                    }
+                  });
+
                   const payloadPolicy = { 
-                    bindings: mappedBindings,
+                    bindings: mergedBindings,
                     etag: currentPolicy.etag
                   };
                   await api.setAgentIamPolicy(newAgent.name, payloadPolicy, restoreConfig, true);
