@@ -773,37 +773,70 @@ export const fetchWorkforceProviderConfig = async (
  * IMPORTANT: The redirect URI (window.location.origin) must be registered as a
  * redirect URI in the identity provider's application configuration.
  */
-export const signInWithOidcPopup = (
+// Helper functions for OAuth 2.1 PKCE (Proof Key for Code Exchange)
+const generateCodeVerifier = (): string => {
+    const array = new Uint8Array(32);
+    crypto.getRandomValues(array);
+    return Array.from(array, byte => ('0' + byte.toString(16)).slice(-2)).join('');
+};
+
+const sha256 = async (plain: string): Promise<ArrayBuffer> => {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(plain);
+    return crypto.subtle.digest('SHA-256', data);
+};
+
+const base64UrlEncode = (a: ArrayBuffer): string => {
+    const str = String.fromCharCode(...new Uint8Array(a));
+    return btoa(str)
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '');
+};
+
+const generateCodeChallenge = async (verifier: string): Promise<string> => {
+    const hashed = await sha256(verifier);
+    return base64UrlEncode(hashed);
+};
+
+/**
+ * Opens an OIDC sign-in popup to the identity provider's authorization endpoint.
+ * Utilizes Authorization Code Flow with PKCE for secure token acquisition.
+ * 
+ * IMPORTANT: The redirect URI (window.location.origin) must be registered as a
+ * redirect URI in the identity provider's application configuration under the "SPA" platform.
+ */
+export const signInWithOidcPopup = async (
     authorizationEndpoint: string,
     clientId: string,
     redirectUri: string,
     scope: string = 'openid profile email',
 ): Promise<{ idToken: string; email?: string; sub?: string }> => {
+    const codeVerifier = generateCodeVerifier();
+    const codeChallenge = await generateCodeChallenge(codeVerifier);
+    const state = crypto.randomUUID();
+
+    const params = new URLSearchParams({
+        client_id: clientId,
+        response_type: 'code',
+        redirect_uri: redirectUri,
+        scope,
+        state,
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256',
+    });
+
+    const popupUrl = `${authorizationEndpoint}?${params.toString()}`;
+    const popup = window.open(popupUrl, 'wif-oidc-signin', 'width=500,height=700,left=200,top=100');
+
+    if (!popup) {
+        throw new Error('Popup was blocked. Please allow popups for this site.');
+    }
+
     return new Promise((resolve, reject) => {
-        const nonce = crypto.randomUUID();
-        const state = crypto.randomUUID();
-
-        const params = new URLSearchParams({
-            client_id: clientId,
-            response_type: 'id_token',
-            redirect_uri: redirectUri,
-            scope,
-            response_mode: 'fragment',
-            nonce,
-            state,
-        });
-
-        const popupUrl = `${authorizationEndpoint}?${params.toString()}`;
-        const popup = window.open(popupUrl, 'wif-oidc-signin', 'width=500,height=700,left=200,top=100');
-
-        if (!popup) {
-            reject(new Error('Popup was blocked. Please allow popups for this site.'));
-            return;
-        }
-
         let settled = false;
 
-        const pollInterval = setInterval(() => {
+        const pollInterval = setInterval(async () => {
             try {
                 if (popup.closed) {
                     clearInterval(pollInterval);
@@ -817,31 +850,67 @@ export const signInWithOidcPopup = (
                 // Try to read popup URL — throws cross-origin error while on IdP domain
                 const currentUrl = popup.location.href;
 
-                // If we can read it and it starts with our redirect URI, capture the token
+                // If we can read it and it starts with our redirect URI, capture the authorization code
                 if (currentUrl.startsWith(redirectUri)) {
                     clearInterval(pollInterval);
                     settled = true;
 
-                    const hash = popup.location.hash.substring(1);
-                    popup.close();
+                    const urlObj = new URL(currentUrl);
+                    const searchParams = urlObj.searchParams;
+                    const code = searchParams.get('code');
+                    const error = searchParams.get('error');
+                    const errorDescription = searchParams.get('error_description');
 
-                    const fragmentParams = new URLSearchParams(hash);
-                    const idToken = fragmentParams.get('id_token');
-                    const error = fragmentParams.get('error');
-                    const errorDescription = fragmentParams.get('error_description');
+                    popup.close();
 
                     if (error) {
                         reject(new Error(`Identity provider error: ${errorDescription || error}`));
                         return;
                     }
 
-                    if (!idToken) {
-                        reject(new Error('No ID token received from the identity provider.'));
+                    if (!code) {
+                        reject(new Error('No authorization code received from the identity provider.'));
                         return;
                     }
 
-                    if (fragmentParams.get('state') !== state) {
+                    if (searchParams.get('state') !== state) {
                         reject(new Error('State mismatch — possible CSRF attack.'));
+                        return;
+                    }
+
+                    // Dynamically derive the token endpoint by replacing '/authorize' with '/token'
+                    const tokenEndpoint = authorizationEndpoint
+                        .replace(/\/authorize$/, '/token')
+                        .replace(/\/authorization\.oauth2$/, '/token.oauth2');
+
+                    console.log("[DEBUG] Exchanging authorization code at token endpoint:", tokenEndpoint);
+
+                    // Exchange Authorization Code + Code Verifier for the ID Token
+                    const tokenExchangeBody = new URLSearchParams({
+                        grant_type: 'authorization_code',
+                        client_id: clientId,
+                        redirect_uri: redirectUri,
+                        code,
+                        code_verifier: codeVerifier,
+                    });
+
+                    const tokenResponse = await fetch(tokenEndpoint, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: tokenExchangeBody.toString(),
+                    });
+
+                    if (!tokenResponse.ok) {
+                        const errText = await tokenResponse.text();
+                        reject(new Error(`Failed to exchange authorization code: ${errText || tokenResponse.statusText}`));
+                        return;
+                    }
+
+                    const tokenData = await tokenResponse.json();
+                    const idToken = tokenData.id_token;
+
+                    if (!idToken) {
+                        reject(new Error('Identity provider did not return an ID Token in the token response.'));
                         return;
                     }
 

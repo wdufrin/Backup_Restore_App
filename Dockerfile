@@ -6,11 +6,9 @@ RUN npm install
 COPY . .
 RUN npm run build
 
-# Step 2: Serve the app
-FROM node:20-slim
-WORKDIR /app
-RUN npm install -g sirv-cli
-COPY --from=builder /app/dist ./dist
+# Step 2: Serve the app with a hardened Nginx server
+FROM nginx:alpine
+COPY --from=builder /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 8080
-# Cloud Run sets the PORT environment variable
-CMD ["sh", "-c", "sirv dist --port ${PORT:-8080} --host 0.0.0.0 --single"]
+CMD ["nginx", "-g", "daemon off;"]

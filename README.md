@@ -78,7 +78,21 @@ gcloud projects add-iam-policy-binding ancient-sandbox-322523 \
     --role="projects/ancient-sandbox-322523/roles/customBackupViewer"
 ```
 
-#### 3. Note on Permission Check
+#### 3. Register and Configure Microsoft Entra ID (Azure AD) App Registration
+To support secure client-side authentication via OIDC PKCE, the Microsoft Entra ID Application Registration must be explicitly configured as a **Single-Page Application (SPA)**. Configuring it as "Web" or "Implicit" will cause token exchange requests to fail due to CORS restrictions.
+
+1. **Log in** to the [Azure Portal](https://portal.azure.com) or [Microsoft Entra admin center](https://entra.microsoft.com).
+2. Navigate to **Microsoft Entra ID** ➔ **App registrations**.
+3. Select the registration matching your application Client ID (configured via `VITE_WIF_CLIENT_ID`).
+4. On the left sidebar, click **Authentication**.
+5. Under **Platform configurations**, click **Add a platform** ➔ Select **Single-page application (SPA)**.
+6. Configure the **Redirect URIs**:
+   * For local development: `http://localhost:5173`
+   * For production: `https://<your-deployed-domain>` (e.g., GKE or Cloud Run ingress URL).
+7. *Crucial:* If the Redirect URIs were previously configured under a **Web** or **Implicit** platform configuration, delete them from the "Web" section first. Entra ID will not allow a redirect URI to be shared across SPA and Web platforms.
+8. Click **Save** at the top of the Authentication page.
+
+#### 4. Note on Permission Check
 The application performs a permission check by attempting to list engines. If it fails, it will show a red **FAIL** status in the UI. Ensure the project ID is set in the settings (Active Project dropdown) to run the check.
 
 ### For GKE Deployment
