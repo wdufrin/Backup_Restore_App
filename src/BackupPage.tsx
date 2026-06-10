@@ -321,8 +321,16 @@ const isMemberCurrentUser = (member: string, userEmail: string, userSub: string,
   if (userEmail) {
     const prefix = userEmail.split('@')[0].toLowerCase();
     if (prefix && prefix.length > 2) {
-      if (owner.toLowerCase().includes(prefix)) return true;
-      if (member.toLowerCase().includes(prefix)) return true;
+      const getUsername = (identity: string): string => {
+        const clean = identity.includes('/subject/') ? identity.split('/subject/').pop()! : identity;
+        return clean.split('@')[0].toLowerCase();
+      };
+      
+      const ownerUsername = getUsername(owner);
+      const memberUsername = getUsername(member);
+      
+      if (ownerUsername === prefix || ownerUsername.includes(prefix)) return true;
+      if (memberUsername === prefix || memberUsername.includes(prefix)) return true;
     }
   }
   
