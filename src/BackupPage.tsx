@@ -1366,7 +1366,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
     }
     addLog(`Starting server-side backup for agents in Assistant: ${apiConfig.assistantId}...`);
     
-    const result = await api.backupAgentsServerSide(apiConfig);
+    const result = await api.backupAgentsServerSide({ ...apiConfig, accessToken });
     if (result.logs) {
       result.logs.forEach((log: string) => addLog(`  [Server] ${log}`));
     }
@@ -2084,6 +2084,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           projectId: userTabConfig.targetProject,
           appLocation: userTabConfig.targetLocation || apiConfig.appLocation,
           appId: userTabConfig.targetAppId || apiConfig.appId,
+          accessToken: targetToken || accessToken,
         };
 
         // 1. Restore Agents
@@ -2773,7 +2774,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
         return;
     }
 
-    const restoreConfig = apiConfig;
+    const restoreConfig = { ...apiConfig, accessToken };
     if (!restoreConfig.appId) {
         throw new Error("You must select a target Gemini Enterprise in the configuration before restoring agents.");
     }
