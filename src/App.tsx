@@ -15,7 +15,8 @@ declare global {
 function App() {
   const isAdminModeEnabled = 
     import.meta.env.VITE_ENABLE_ADMIN_MODE === 'true' || 
-    new URLSearchParams(window.location.search).get('admin') === 'true';
+    Array.from(new URLSearchParams(window.location.search).entries())
+      .some(([key, val]) => key.toLowerCase() === 'admin' && val.toLowerCase() === 'true');
   const sourceIdp = import.meta.env.VITE_SOURCE_IDP || 'Google';
   const targetIdp = import.meta.env.VITE_TARGET_IDP || 'Google';
 
