@@ -2337,3 +2337,59 @@ export const getUserInfo = async (accessToken: string) => {
     }
     return response.json();
 };
+
+export const backupAgentsServerSide = async (config: Config) => {
+    const response = await fetch('/api/backup/agents', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            projectId: config.projectId,
+            appLocation: config.appLocation,
+            collectionId: config.collectionId || 'default_collection',
+            appId: config.appId,
+            assistantId: config.assistantId || 'default_assistant',
+            accessToken: config.accessToken
+        })
+    });
+    if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `Server backup failed: ${response.statusText}`);
+    }
+    return response.json();
+};
+
+export const restoreAgentsServerSide = async (
+    restoreConfig: Config,
+    agents: Agent[],
+    datastoreMapping: Record<string, string>,
+    collectionMapping: Record<string, string>,
+    sourceConfig?: any
+) => {
+    const response = await fetch('/api/restore/agents', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            restoreConfig: {
+                projectId: restoreConfig.projectId,
+                appLocation: restoreConfig.appLocation,
+                collectionId: restoreConfig.collectionId || 'default_collection',
+                appId: restoreConfig.appId,
+                assistantId: restoreConfig.assistantId || 'default_assistant',
+                accessToken: restoreConfig.accessToken
+            },
+            agents,
+            datastoreMapping,
+            collectionMapping,
+            sourceConfig
+        })
+    });
+    if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `Server restore failed: ${response.statusText}`);
+    }
+    return response.json();
+};
