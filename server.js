@@ -413,7 +413,7 @@ app.post('/api/restore/agents', async (req, res) => {
 app.use(express.static(path.join(__dirname, 'dist')));
 
 // Fallback SPA routing - redirect non-file requests to index.html
-app.get('*', (req, res) => {
+app.get('*any', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
