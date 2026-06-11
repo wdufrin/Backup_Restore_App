@@ -46,8 +46,8 @@ While this tool simplifies the migration process, please be aware of the followi
 ### For Workforce Identity Federation (Entra ID / Okta)
 To allow users logging in via Workforce Identity Federation to use the self-service backup and restore features without granting them full project administrator rights, you must create a custom IAM role and assign it to them.
 
-#### 1. Create Custom Role in Source Project
-Create a custom role named `customBackupViewer` at the project level in the source project with the following permissions:
+#### 1. Create Custom Role in Source and Target Projects
+Create a custom role named `customBackupViewer` at the project level in BOTH the source and target projects with the following permissions:
 - **`discoveryengine.engines.list`** & **`discoveryengine.engines.get`**: To list and read search engine configurations in the environment.
 - **`discoveryengine.assistants.list`** & **`discoveryengine.assistants.get`**: To discover assistants and retrieve persona instructions or web search configs.
 - **`discoveryengine.agents.list`** & **`discoveryengine.agents.get`**: To list and extract full agent definitions (JSON configs) for backups.
@@ -71,11 +71,17 @@ gcloud iam roles create customBackupViewer \
 ```
 
 #### 2. Assign Role to Users/Groups
-Grant this custom role to your Workforce Principal or Group:
+Grant this custom role to your Workforce Principal or Group in BOTH the source and target projects:
 ```bash
+# Bind in Source Project
 gcloud projects add-iam-policy-binding ancient-sandbox-322523 \
     --member="principalSet://iam.googleapis.com/locations/global/workforcePools/wdufrin-entra/group/0b996e92-feda-493f-856b-19dc426d75c5" \
     --role="projects/ancient-sandbox-322523/roles/customBackupViewer"
+
+# Bind in Target Project
+gcloud projects add-iam-policy-binding testgebackupandrestore-499116 \
+    --member="principalSet://iam.googleapis.com/locations/global/workforcePools/wdufrin-entra/group/0b996e92-feda-493f-856b-19dc426d75c5" \
+    --role="projects/testgebackupandrestore-499116/roles/customBackupViewer"
 ```
 
 #### 3. Register and Configure Microsoft Entra ID (Azure AD) App Registration

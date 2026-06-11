@@ -214,8 +214,12 @@ function App() {
 
   const handleSignOut = () => {
     setAccessToken('');
+    setSourceToken('');
+    setTargetToken('');
     setUserProfile(null);
     sessionStorage.removeItem('agentspace-accessToken');
+    sessionStorage.removeItem('agentspace-sourceToken');
+    sessionStorage.removeItem('agentspace-targetToken');
     sessionStorage.removeItem('agentspace-userProfile');
   };
 

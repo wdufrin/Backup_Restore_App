@@ -317,23 +317,6 @@ const isMemberCurrentUser = (member: string, userEmail: string, userSub: string,
     if (member === wifPrincipal) return true;
   }
   
-  // 4. Smart prefix-based match (e.g., matching Google user 'wdufrin' with WIF principal 'admin@wdufrin.allostrat.com')
-  if (userEmail) {
-    const prefix = userEmail.split('@')[0].toLowerCase();
-    if (prefix && prefix.length > 2) {
-      const getUsername = (identity: string): string => {
-        const clean = identity.includes('/subject/') ? identity.split('/subject/').pop()! : identity;
-        return clean.split('@')[0].toLowerCase();
-      };
-      
-      const ownerUsername = getUsername(owner);
-      const memberUsername = getUsername(member);
-      
-      if (ownerUsername === prefix || ownerUsername.includes(prefix)) return true;
-      if (memberUsername === prefix || memberUsername.includes(prefix)) return true;
-    }
-  }
-  
   return false;
 };
 
