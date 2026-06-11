@@ -2146,10 +2146,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           
           if (iamPolicy && iamPolicy.bindings) {
             for (const binding of iamPolicy.bindings) {
-              // Skip owner role as requested by user
-              if (binding.role === 'roles/discoveryengine.agentOwner') {
-                continue;
-              }
+
               if (binding.members) {
                 const filteredMembers = binding.members.filter((member: string) => {
                   return !isMemberCurrentUser(member, userEmail || '', userSub || '', poolId) &&
@@ -2212,9 +2209,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           
           if (iamPolicy && iamPolicy.bindings) {
             for (const binding of iamPolicy.bindings) {
-              if (binding.role === 'roles/discoveryengine.agentOwner') {
-                continue;
-              }
+
               if (binding.members) {
                 const filteredMembers = binding.members.filter((member: string) => {
                   return !isMemberCurrentUser(member, userEmail || '', userSub || '', poolId) &&
@@ -2223,6 +2218,10 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                 sharedWith.push(...filteredMembers);
               }
             }
+          }
+          
+          if (sharedWith.length === 0 && nb.metadata?.isShared === true) {
+            sharedWith.push("UNKNOWN_SHARED_USERS_PLACEHOLDER");
           }
 
           const localFiles: string[] = [];
@@ -2619,14 +2618,18 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
         );
 
         if (nb.sharedWith && nb.sharedWith.length > 0) {
+          const isPlaceholder = nb.sharedWith.includes("UNKNOWN_SHARED_USERS_PLACEHOLDER");
           children.push(
             new Paragraph({
               children: [
                 new TextRun({
-                  text: "     * Share with: " + nb.sharedWith.join(", "),
+                  text: isPlaceholder 
+                    ? "     * ⚠️ WARNING: This notebook was shared in the source project, but the Notebook API does not expose the list of shared users. Please check your source notebook and manually share this notebook in the target project."
+                    : "     * Share with: " + nb.sharedWith.join(", "),
                   size: 20,
-                  color: "6B46C1",
+                  color: isPlaceholder ? "D97706" : "6B46C1",
                   font: "Calibri",
+                  bold: isPlaceholder
                 }),
               ],
               spacing: { after: 40 },
@@ -3127,7 +3130,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                     </div>
                   </div>
                   <div className="pl-6">
-                    {nb.sharedWith && nb.sharedWith.length > 0 ? (
+                    {nb.sharedWith && nb.sharedWith.length > 0 && !nb.sharedWith.includes("UNKNOWN_SHARED_USERS_PLACEHOLDER") ? (
                       <div>
                         <p className="font-semibold text-[10px] text-purple-700 mb-1">Share with the following users:</p>
                         <div className="flex flex-wrap gap-1">
@@ -3139,7 +3142,9 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                         </div>
                       </div>
                     ) : (
-                      <p className="text-[10px] text-gray-400">We are unable to retrieve shared users from source. Please manually document and reshare your notebooks if needed.</p>
+                      <p className="text-[10px] text-amber-600 font-semibold bg-amber-50 dark:bg-slate-700 dark:text-amber-400 p-1.5 rounded border border-amber-200 dark:border-slate-650">
+                        ⚠️ This notebook was shared in the source project. However, the Notebook API does not expose the list of shared users. Please check your source notebook and manually share this notebook in the target project.
+                      </p>
                     )}
                   </div>
                 </div>
