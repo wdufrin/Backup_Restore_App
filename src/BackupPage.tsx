@@ -1740,7 +1740,17 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           continue;
         }
 
-        // 2. Resolve Owner
+        // 2. Fetch IAM Policy
+        let policy: any = null;
+        try {
+          policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
+        } catch (policyErr: any) {
+          if (isDebugMode) {
+            addLog(`    - Warning: Failed to fetch IAM policy: ${policyErr.message}`);
+          }
+        }
+
+        // 3. Resolve Owner
         const agentOwner = agentView?.ownerUserPrincipal || agentView?.ownerDisplayName || agentView?.agentOwner || agentView?.owner;
         let isOwned = false;
         let hasOwner = false;
@@ -1757,37 +1767,29 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               isOwned = agentOwner.toLowerCase().includes(prefix);
             }
           }
-        } else {
-          // Fallback to IAM policy if owner is not present in agentView
-          try {
-            const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
-            if (policy && policy.bindings) {
-              const ownerBinding = policy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
-              if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
-                hasOwner = true;
-                const firstMember = ownerBinding.members[0];
-                isOwned = firstMember.toLowerCase().includes(userEmail.toLowerCase()) ||
-                          (userSub && firstMember.includes(userSub)) ||
-                          (poolId && firstMember.includes(poolId));
-                
-                // Prefix-based matching fallback
-                if (!isOwned && userEmail) {
-                  const prefix = userEmail.split('@')[0].toLowerCase();
-                  if (prefix && prefix.length > 2) {
-                    isOwned = firstMember.toLowerCase().includes(prefix);
-                  }
-                }
+        } else if (policy && policy.bindings) {
+          const ownerBinding = policy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
+          if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
+            hasOwner = true;
+            const firstMember = ownerBinding.members[0];
+            isOwned = firstMember.toLowerCase().includes(userEmail.toLowerCase()) ||
+                      (userSub && firstMember.includes(userSub)) ||
+                      (poolId && firstMember.includes(poolId));
+            
+            // Prefix-based matching fallback
+            if (!isOwned && userEmail) {
+              const prefix = userEmail.split('@')[0].toLowerCase();
+              if (prefix && prefix.length > 2) {
+                isOwned = firstMember.toLowerCase().includes(prefix);
               }
             }
-          } catch (policyErr) {
-            // If we can't get IAM policy either, default to unowned (hasOwner = false)
           }
         }
 
         const enrichedAgent = { 
           ...agent, 
           agentType: 'Low Code',
-          iamPolicy: agentView?.iamPolicy
+          iamPolicy: policy
         };
         fullBackupAgents.push(enrichedAgent);
 
