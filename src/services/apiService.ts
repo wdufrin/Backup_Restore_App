@@ -75,9 +75,12 @@ export const gapiRequest = async <T>(
         requestHeaders['X-Goog-User-Project'] = projectId;
     }
 
-    const token = accessToken || client.getToken()?.access_token;
-    if (token) {
-        requestHeaders['Authorization'] = `Bearer ${token}`;
+    // Only populate Authorization header if not already explicitly provided in headers
+    if (!requestHeaders['Authorization']) {
+        const token = accessToken || client.getToken()?.access_token;
+        if (token) {
+            requestHeaders['Authorization'] = `Bearer ${token}`;
+        }
     }
 
     // Ensure Content-Type is set for POST/PUT if body exists

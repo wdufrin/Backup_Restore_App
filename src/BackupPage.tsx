@@ -460,7 +460,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
       }
       if (userTabConfig.targetProject && targetApps.length === 0) {
         setIsLoadingTargetApps(true);
-        fetchAppsForProject(userTabConfig.targetProject, userTabConfig.targetLocation)
+        fetchAppsForProject(userTabConfig.targetProject, userTabConfig.targetLocation, targetToken || accessToken)
           .then(apps => setTargetApps(apps))
           .finally(() => setIsLoadingTargetApps(false));
       }
@@ -598,7 +598,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
             }
             if (json.userTabConfig.targetProject) {
               const targetLoc = json.userTabConfig.targetLocation || 'global';
-              fetchAppsForProject(json.userTabConfig.targetProject, targetLoc).then(apps => setTargetApps(apps));
+              fetchAppsForProject(json.userTabConfig.targetProject, targetLoc, targetToken || accessToken).then(apps => setTargetApps(apps));
             }
           }
           if (json.datastoreMapping) {
@@ -684,7 +684,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
           }
           if (newUserTabConfig.targetProject) {
             const targetLoc = newUserTabConfig.targetLocation || 'global';
-            fetchAppsForProject(newUserTabConfig.targetProject, targetLoc).then(apps => setTargetApps(apps));
+            fetchAppsForProject(newUserTabConfig.targetProject, targetLoc, targetToken || accessToken).then(apps => setTargetApps(apps));
           }
 
           addLog(`Admin configuration imported successfully from .env file.`);
@@ -1046,7 +1046,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
       projectId: projectNumber,
   }), [config, projectNumber]);
 
-  async function fetchAppsForProject(projectId: string, location: string): Promise<any[]> {
+  async function fetchAppsForProject(projectId: string, location: string, token?: string): Promise<any[]> {
     if (!projectId) return [];
     try {
       const mockConfig = {
@@ -1055,6 +1055,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
         collectionId: 'default_collection',
         appId: '',
         assistantId: 'default_assistant',
+        accessToken: token || accessToken,
       };
       const response = await api.listResources('engines', mockConfig);
       return response.engines || [];
@@ -3344,7 +3345,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                       <button 
                         onClick={async () => {
                           setIsLoadingTargetApps(true);
-                          const apps = await fetchAppsForProject(userTabConfig.targetProject, userTabConfig.targetLocation);
+                          const apps = await fetchAppsForProject(userTabConfig.targetProject, userTabConfig.targetLocation, targetToken || accessToken);
                           setTargetApps(apps);
                           setIsLoadingTargetApps(false);
                         }}
@@ -3364,7 +3365,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                         setUserTabConfig(prev => ({ ...prev, targetLocation: newLoc }));
                         if (userTabConfig.targetProject) {
                           setIsLoadingTargetApps(true);
-                          const apps = await fetchAppsForProject(userTabConfig.targetProject, newLoc);
+                          const apps = await fetchAppsForProject(userTabConfig.targetProject, newLoc, targetToken || accessToken);
                           setTargetApps(apps);
                           setIsLoadingTargetApps(false);
                         }
@@ -3907,7 +3908,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                     <button 
                       onClick={async () => {
                         setIsLoadingTargetApps(true);
-                        const apps = await fetchAppsForProject(userTabConfig.targetProject, userTabConfig.targetLocation);
+                        const apps = await fetchAppsForProject(userTabConfig.targetProject, userTabConfig.targetLocation, targetToken || accessToken);
                         setTargetApps(apps);
                         setIsLoadingTargetApps(false);
                       }}
@@ -3927,7 +3928,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                       setUserTabConfig(prev => ({ ...prev, targetLocation: newLocation }));
                       if (userTabConfig.targetProject) {
                         setIsLoadingTargetApps(true);
-                        const apps = await fetchAppsForProject(userTabConfig.targetProject, newLocation);
+                        const apps = await fetchAppsForProject(userTabConfig.targetProject, newLocation, targetToken || accessToken);
                         setTargetApps(apps);
                         setIsLoadingTargetApps(false);
                       }

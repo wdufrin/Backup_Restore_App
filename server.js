@@ -291,6 +291,12 @@ app.post('/api/restore/agents', async (req, res) => {
           if (definition.session) {
             delete definition.session;
           }
+          if (definition.agentFiles) {
+            delete definition.agentFiles;
+          }
+          if (definition.deployedAgentFiles) {
+            delete definition.deployedAgentFiles;
+          }
 
           let defStr = JSON.stringify(definition);
 
