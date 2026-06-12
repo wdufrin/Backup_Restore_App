@@ -254,6 +254,35 @@ function App() {
     reader.readAsText(file);
   };
 
+  const renderLoginButton = (role: 'source' | 'target') => {
+    const idp = role === 'source' ? sourceIdp : (sourceIdp === 'Google' ? 'WiF' : 'Google');
+    
+    if (idp === 'Google' && enableGoogleIdp) {
+      return (
+        <button 
+          key="google"
+          onClick={handleGoogleSignIn} 
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
+        >
+          {isIdpChangeEnabled ? `Sign In to ${role === 'source' ? 'Source' : 'Target'} (Google)` : 'Sign In with Google'}
+        </button>
+      );
+    }
+    
+    if (idp === 'WiF' && enableWifIdp) {
+      return (
+        <button 
+          key="wif"
+          onClick={handleWifSignIn} 
+          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
+        >
+          {isIdpChangeEnabled ? `Sign In to ${role === 'source' ? 'Source' : 'Target'} (WiF)` : 'Sign In with WiF'}
+        </button>
+      );
+    }
+    return null;
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-900 text-gray-900 dark:text-slate-200 flex flex-col font-sans">
       <header className="bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 p-4 flex justify-between items-center h-14 flex-shrink-0 shadow-sm">
@@ -297,26 +326,7 @@ function App() {
               </div>
               <button onClick={handleSignOut} className="ml-2 text-xs text-red-400 hover:text-red-300 font-medium">Sign Out</button>
             </div>
-          ) : (
-            <div className="flex gap-2">
-              {enableGoogleIdp && (
-                <button 
-                  onClick={handleGoogleSignIn} 
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
-                >
-                  {isIdpChangeEnabled ? `Sign In to ${sourceIdp === 'Google' ? 'Source' : 'Target'} (Google)` : 'Sign In with Google'}
-                </button>
-              )}
-              {enableWifIdp && (
-                <button 
-                  onClick={handleWifSignIn} 
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
-                >
-                  {isIdpChangeEnabled ? `Sign In to ${sourceIdp === 'WiF' ? 'Source' : 'Target'} (WiF)` : 'Sign In with WiF'}
-                </button>
-              )}
-            </div>
-          )}
+          ) : null}
         </div>
       </header>
 
@@ -353,22 +363,8 @@ function App() {
             <div className="flex flex-col items-center justify-center mt-20">
               <p className="text-gray-600 mb-4">Please sign in to access backup and restore functions.</p>
               <div className="flex gap-2 items-center">
-                {enableGoogleIdp && (
-                  <button 
-                    onClick={handleGoogleSignIn} 
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
-                  >
-                    {isIdpChangeEnabled ? `Sign In to ${sourceIdp === 'Google' ? 'Source' : 'Target'} (Google)` : 'Sign In with Google'}
-                  </button>
-                )}
-                {enableWifIdp && (
-                  <button 
-                    onClick={handleWifSignIn} 
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
-                  >
-                    {isIdpChangeEnabled ? `Sign In to ${sourceIdp === 'WiF' ? 'Source' : 'Target'} (WiF)` : 'Sign In with WiF'}
-                  </button>
-                )}
+                {renderLoginButton('source')}
+                {renderLoginButton('target')}
                 {isAdminModeEnabled && (
                   <button onClick={() => setIsWifModalOpen(true)} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full shadow-md transition-colors" title="WIF Configuration">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
