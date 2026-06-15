@@ -2,210 +2,254 @@
 
 ## 1. Overview
 
-This application provides self-service backup and recovery capabilities for Gemini Enterprise configurations (Agents and Notebooks). It supports multi-environment deployments and sequential account switching for cross-IDP migrations.
+This application provides self-service backup and recovery capabilities for Gemini Enterprise configurations, focusing on Search/Chat Engines, Assistants, low-code Agents, Notebooks, and Chat History archives. It facilitates multi-environment deployments, sequential account switching for cross-identity provider (IDP) migrations, and automated remapping of external connectors (such as SharePoint or Google Drive).
 
 ### Modes of Operation
 
-The application supports 3 different modes of operation:
+The application supports three distinct modes of operation depending on configuration flags:
 
 #### 1. Admin Mode
-*   **When to use**: When you need to configure environment mappings, load data assets, and generate the `.env` file.
+*   **When to use**: When you need to configure target environment mappings, discover/load active data assets, and generate configuration settings.
 *   **Flags needed**: `VITE_ENABLE_ADMIN_MODE=true`
-*   **How to use**: This unlocks the "Admin View" tab where you can manage configurations and export them.
+*   **How to use**: This unlocks the "Admin View" tab in the dashboard, enabling administrators to manage environmental mappings and export configuration templates.
 
 #### 2. User Only with Single IDP
-*   **When to use**: When regular users want to backup or restore their personal agents and notebooks within the same Identity Provider (no account switching needed).
-*   **Flags needed**: `VITE_IDP_CHANGE_ENABLED=false` (and optionally `VITE_ENABLE_ADMIN_MODE=false` to hide the admin tab from regular users).
-*   **How to use**: Regular users operate in the "User View". They can use the "Backup My Data" and "Restore My Data" buttons to download and upload configuration files.
+*   **When to use**: When regular users want to backup or restore their personal agents and notebooks within the same Identity Provider without changing login credentials.
+*   **Flags needed**: `VITE_IDP_CHANGE_ENABLED=false` and `VITE_ENABLE_ADMIN_MODE=false`.
+*   **How to use**: Users operate in the simplified "User View", clicking "Backup My Data" to download their agent configuration and "Restore My Data" to re-import it.
 
 #### 3. Cross-IDP Mode
-*   **When to use**: When migrating resources across different organizations or IDPs (e.g., from Google to Entra ID) where simultaneous login is not possible.
+*   **When to use**: When migrating resources across different Google Cloud organizations or identity providers (e.g., from Google Accounts to Microsoft Entra ID via Workforce Identity Federation) where simultaneous login is not possible.
 *   **Flags needed**: `VITE_IDP_CHANGE_ENABLED=true`
-*   **How to use**: This activates the 4-step guided workflow in the User View:
-    1. Backup from Source.
-    2. Sign Out and Switch to the Target IDP (using the provided button).
-    3. Verify connectors in the target environment.
-    4. Upload the file and Restore.
+*   **How to use**: Activates a 4-step guided migration workflow:
+    1.  **Backup**: Log in to the source account, select resources, and download the configuration archive.
+    2.  **Switch Accounts**: Sign out and sign in using the target account/IDP.
+    3.  **Verify Connectors**: Test authentication bridges in the target environment.
+    4.  **Restore**: Upload the source archive, map collections/datastores, and run restoration.
 
-### Limitations of the Migration Tool
+### Key Limitations
+*   **Draft Status**: Restored agents are created in **Draft** status; they must be manually reviewed and published in the target project.
+*   **Local Files**: Local files attached to Notebooks are not backed up and must be manually re-uploaded.
+*   **Sharing Permissions**: IAM bindings for personal resources do not automatically translate across different IDPs; permissions must be updated manually.
+*   **Unmapped Datastores**: If a datastore has no target mapping defined, its connections are skipped and reported in the post-restore summary.
+*   **Stateless Server**: When deployed to serverless environments (like Cloud Run), dynamically modified admin configurations are not persisted on-disk. Administrators must download the exported `.env.exported` and commit it.
 
-While this tool simplifies the migration process, please be aware of the following limitations:
+---
 
-*   **Draft Status**: All restored agents are created in **Draft** status. You must manually review and publish them in the target environment.
-*   **Local Files**: Local files attached to Notebooks cannot be automatically transferred and must be re-uploaded manually in the target environment.
-*   **Sharing Permissions**: Sharing permissions and user roles may not transfer automatically across different IDPs or organizations. You will need to reshare resources manually.
-*   **Unmapped Datastores**: If a datastore in the source cannot be mapped to a corresponding datastore in the target, it will be skipped and reported in the finalization steps for manual resolution.
-*   **Stateless Cloud Run**: When deployed to Cloud Run, changes made in the Admin tab cannot be saved permanently to the server. You must export the config and update your `.env` file.
+## 2. Architecture & How It Works
 
-## 2. Prerequisites
+The application decouples lightweight configuration management (client-side) from resource-heavy parallel API processing (server-side).
 
-### General & Local Development
-- **Node.js**: Required to run the development server and build the application.
-- **IAM Permissions**: Users need appropriate permissions to access Discovery Engine resources.
+### Component Architecture
 
-### For Workforce Identity Federation (Entra ID / Okta)
-To allow users logging in via Workforce Identity Federation to use the self-service backup and restore features without granting them full project administrator rights, you must create a custom IAM role and assign it to them.
+```mermaid
+graph TD
+    subgraph Client ["Client Browser"]
+        Frontend["React SPA (Vite / Browser)"]
+        GAPI["gapi.js Client (GCP SDK)"]
+    end
 
-#### 1. Create Custom Role in Source and Target Projects
-Create a custom role named `customBackupViewer` at the project level in BOTH the source and target projects with the following permissions:
-- **`discoveryengine.engines.list`** & **`discoveryengine.engines.get`**: To list and read search engine configurations in the environment.
-- **`discoveryengine.assistants.list`** & **`discoveryengine.assistants.get`**: To discover assistants and retrieve persona instructions or web search configs.
-- **`discoveryengine.agents.list`** & **`discoveryengine.agents.get`**: To list and extract full agent definitions (JSON configs) for backups.
-- **`discoveryengine.agents.getAgentView`**: To resolve exact agent type (`LOW_CODE`) and owner (`ownerUserPrincipal`) without guessing.
-- **`discoveryengine.agents.getIamPolicy`**: To read agent IAM policy bindings for ownership verification.
-- **`discoveryengine.agents.create`** & **`discoveryengine.agents.update`**: To create and restore agents in the target environment.
-- **`discoveryengine.agents.deploy`**: To deploy and publish migrated agents to the target environment.
-- **`discoveryengine.agents.manage`**: To manage assistant-level agent references under `v1alpha`.
-- **`discoveryengine.notebooks.list`** & **`discoveryengine.notebooks.get`**: To discover and extract notebooks and their cell contents.
-- **`discoveryengine.notebooks.create`**: To create/restore notebooks in the target project.
-- **`serviceusage.services.use`**: To allow your Workforce identity principal to make standard Discovery Engine API requests.
+    subgraph Auth ["Authentication Services"]
+        GIS["Google Sign-In (accounts.google.com)"]
+        IdP["Azure Entra ID (login.microsoftonline.com)"]
+        STS["Google STS (sts.googleapis.com)"]
+    end
 
-You can create it using `gcloud`:
+    subgraph Backend ["Application Backend"]
+        Express["Node Express Server (server.js)"]
+    end
+
+    subgraph GoogleCloud ["Google Cloud API Endpoints"]
+        DE["Discovery Engine (*.discoveryengine.googleapis.com)"]
+        GCS["Cloud Storage (storage.googleapis.com)"]
+        CB["Cloud Build (cloudbuild.googleapis.com)"]
+    end
+
+    %% Network flows
+    Frontend -- "1. Google Login (HTTPS/443)" --> GIS
+    Frontend -- "2. Entra ID Login (HTTPS/443)" --> IdP
+    Frontend -- "3. Exchange STS Token (HTTPS/443)" --> STS
+    
+    Frontend -- "4. Backup/Restore Requests (HTTP/HTTPS)" --> Express
+    GAPI -- "5. GCS Upload/Download (HTTPS/443)" --> GCS
+    GAPI -- "6. Trigger builds & check logs (HTTPS/443)" --> CB
+    
+    Express -- "7. Fetch/Restore Agents & IAM (HTTPS/443)" --> DE
+```
+
+### Client-Side App (React SPA)
+*   **State Management**: Access tokens and user profiles are held strictly in `sessionStorage` to mitigate Cross-Site Scripting (XSS) risks.
+*   **Direct-to-GCP Operations**: Utilizes Google's client-side API loader (`gapi.js`) to directly list GCS buckets, stream objects, and query Cloud Build logs, avoiding backend bottlenecks.
+*   **OIDC PKCE Authentication**: Orchestrates browser-popup login flows for Microsoft Entra ID, subsequently querying Google's Security Token Service (STS) to obtain a Google Cloud token for Workforce Identity Federation (WIF).
+
+### Server-Side App (Express Backend)
+*   **Static Serving**: Compiles the React SPA and serves the static production build (`/dist`).
+*   **Concurrency Management**: Employs a custom dependency-free queue scheduler (`mapConcurrent`) to orchestrate API calls in parallel:
+    *   **Backup**: Fetches agent configurations, views, and IAM policies in parallel with a limit of 15 concurrent tasks.
+    *   **Restore**: Creates restored agents, resolves data mapping conflicts, and merges IAM permissions with a limit of 10 concurrent tasks.
+*   **Payload Transformation**: Dynamically replaces source variables (e.g., project numbers, locations, engine IDs) inside agent JSON schemas before submitting them to the target environment.
+
+---
+
+## 3. Network Ports & Protocols
+
+All communication between the user's browser, the application host, identity providers, and Google Cloud endpoints is secured over SSL/TLS.
+
+### Local Development Network Flow
+*   **Frontend Dev Server**: Listens on TCP port `5173` (HTTP). Proxies all calls matching `/api/*` internally to the backend.
+*   **Backend Server**: Listens on TCP port `8080` (HTTP).
+
+### GKE Ingress Port Mapping
+
+```mermaid
+graph LR
+    User([User Browser]) -- "HTTPS / TCP 443" --> Ingress[Kubernetes Ingress]
+    Ingress -- "HTTP / TCP 80 (Internal)" --> Service[NodePort Service]
+    Service -- "HTTP / TCP 8080 (TargetPort)" --> Pod[Express Pod]
+```
+
+### Network Endpoints & Ports
+
+| Source | Destination | Hostname / URL | Port | Protocol | Purpose |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| User Browser | App Host (Vite Dev) | `localhost` | 5173 | HTTP | Local frontend development server |
+| User Browser | App Host (Express) | `localhost` | 8080 | HTTP | Local backend service endpoint |
+| User Browser | App Ingress | `backup.ge-dufrin.com` | 443 | HTTPS | Production application entry point |
+| User Browser | Google Sign-in | `accounts.google.com` | 443 | HTTPS | Client Google authentication |
+| User Browser | Microsoft Entra | `login.microsoftonline.com` | 443 | HTTPS | Client WIF/OIDC identity provider login |
+| User Browser | Google STS | `sts.googleapis.com` | 443 | HTTPS | Exchanging identity provider token for GCP access token |
+| User Browser | GCS API | `storage.googleapis.com` | 443 | HTTPS | Directly listing and downloading GCS assets |
+| User Browser | Cloud Build API | `cloudbuild.googleapis.com` | 443 | HTTPS | Directly tracking agent build details and logs |
+| Express Server | Discovery Engine | `*.discoveryengine.googleapis.com` | 443 | HTTPS | Bulk retrieval and creation of agent/engine configurations |
+
+---
+
+## 4. Prerequisites & Permissions
+
+### Minimum IAM Permissions
+To execute migrations without requiring project Owner credentials, assign a custom role in **both** source and target projects containing the following permissions:
+
+*   `discoveryengine.engines.list` & `discoveryengine.engines.get`
+*   `discoveryengine.assistants.list` & `discoveryengine.assistants.get`
+*   `discoveryengine.agents.list` & `discoveryengine.agents.get`
+*   `discoveryengine.agents.getAgentView` & `discoveryengine.agents.getIamPolicy`
+*   `discoveryengine.agents.create` & `discoveryengine.agents.update`
+*   `discoveryengine.agents.deploy` & `discoveryengine.agents.manage`
+*   `discoveryengine.notebooks.list` & `discoveryengine.notebooks.get` & `discoveryengine.notebooks.create`
+*   `serviceusage.services.use`
+
+You can provision this role using the `gcloud` CLI:
 ```bash
 gcloud iam roles create customBackupViewer \
-    --project=ancient-sandbox-322523 \
-    --title="Discovery Engine Custom Backup Viewer" \
-    --description="Least-privilege role required to discover, backup, migrate, and restore agents and notebooks." \
+    --project="YOUR_PROJECT_ID" \
+    --title="Discovery Engine Backup Viewer" \
+    --description="Least-privilege role required to migrate agents and notebooks." \
     --permissions="discoveryengine.engines.list,discoveryengine.engines.get,discoveryengine.assistants.list,discoveryengine.assistants.get,discoveryengine.agents.list,discoveryengine.agents.get,discoveryengine.agents.getAgentView,discoveryengine.agents.getIamPolicy,discoveryengine.agents.create,discoveryengine.agents.update,discoveryengine.agents.deploy,discoveryengine.agents.manage,discoveryengine.notebooks.list,discoveryengine.notebooks.get,discoveryengine.notebooks.create,serviceusage.services.use" \
     --stage=GA
 ```
 
-#### 2. Assign Role to Users/Groups
-Grant this custom role to your Workforce Principal or Group in BOTH the source and target projects:
+Bind the role to your migrating workforce principal/group:
 ```bash
-# Bind in Source Project
-gcloud projects add-iam-policy-binding ancient-sandbox-322523 \
-    --member="principalSet://iam.googleapis.com/locations/global/workforcePools/wdufrin-entra/group/0b996e92-feda-493f-856b-19dc426d75c5" \
-    --role="projects/ancient-sandbox-322523/roles/customBackupViewer"
-
-# Bind in Target Project
-gcloud projects add-iam-policy-binding testgebackupandrestore-499116 \
-    --member="principalSet://iam.googleapis.com/locations/global/workforcePools/wdufrin-entra/group/0b996e92-feda-493f-856b-19dc426d75c5" \
-    --role="projects/testgebackupandrestore-499116/roles/customBackupViewer"
+gcloud projects add-iam-policy-binding "YOUR_PROJECT_ID" \
+    --member="principalSet://iam.googleapis.com/locations/global/workforcePools/YOUR_POOL/group/YOUR_GROUP_ID" \
+    --role="projects/YOUR_PROJECT_ID/roles/customBackupViewer"
 ```
 
-#### 3. Register and Configure Microsoft Entra ID (Azure AD) App Registration
-To support secure client-side authentication via OIDC PKCE, the Microsoft Entra ID Application Registration must be explicitly configured as a **Single-Page Application (SPA)**. Configuring it as "Web" or "Implicit" will cause token exchange requests to fail due to CORS restrictions.
+### Identity Provider App Registration (Azure AD / Entra ID)
+To enable browser-based login with PKCE, the application registration must be configured as a **Single-Page Application (SPA)**:
+1.  Navigate to the [Azure Portal](https://portal.azure.com) -> **Microsoft Entra ID** -> **App registrations**.
+2.  Select your App Registration.
+3.  Click **Authentication** on the left menu.
+4.  Under **Platform configurations**, click **Add a platform** and select **Single-page application (SPA)**.
+5.  Set your Redirect URIs (e.g. `http://localhost:5173` for development, `https://backup.ge-dufrin.com` for production).
+6.  *Crucial:* If these URIs were previously configured under "Web" or "Implicit Grant", delete them there first. Entra ID does not allow overlapping redirects across Web and SPA platforms.
+7.  Save changes.
 
-1. **Log in** to the [Azure Portal](https://portal.azure.com) or [Microsoft Entra admin center](https://entra.microsoft.com).
-2. Navigate to **Microsoft Entra ID** ➔ **App registrations**.
-3. Select the registration matching your application Client ID (configured via `VITE_WIF_CLIENT_ID`).
-4. On the left sidebar, click **Authentication**.
-5. Under **Platform configurations**, click **Add a platform** ➔ Select **Single-page application (SPA)**.
-6. Configure the **Redirect URIs**:
-   * For local development: `http://localhost:5173`
-   * For production: `https://<your-deployed-domain>` (e.g., GKE or Cloud Run ingress URL).
-7. *Crucial:* If the Redirect URIs were previously configured under a **Web** or **Implicit** platform configuration, delete them from the "Web" section first. Entra ID will not allow a redirect URI to be shared across SPA and Web platforms.
-8. Click **Save** at the top of the Authentication page.
+---
 
-#### 4. Note on Permission Check
-The application performs a permission check by attempting to list engines. If it fails, it will show a red **FAIL** status in the UI. Ensure the project ID is set in the settings (Active Project dropdown) to run the check.
+## 5. Setup & Installation
 
-### For GKE Deployment
-1.  A running GKE cluster.
-2.  `kubectl` installed and configured to connect to your cluster.
-3.  `gcloud` configured with your project.
+### Option A: Local Development
 
-## 3. Configuration Instructions
+1.  **Clone the Repository**:
+    ```bash
+    git clone <repository_url>
+    cd Backup_Restore_App
+    ```
 
-The application is configured using environment variables in the `.env` file. You can also configure it dynamically via the Admin tab.
+2.  **Install Dependencies**:
+    ```bash
+    npm install
+    ```
 
-### The `.env` File
+3.  **Configure Environment**:
+    Copy the template environment file and fill in your values:
+    ```bash
+    cp .env.example .env
+    ```
 
-The file is organized into sections:
-*   **App Mode & Feature Flags**: Toggles for admin mode, single-click migration, and IDP visibility. *Note: `VITE_ENABLE_GOOGLE_IDP` and `VITE_ENABLE_WIF_IDP` default to `true` unless explicitly set to `false`.*
-*   **Source & Target Environments**: Project IDs, locations, and App IDs for source and target.
-*   **WIF Configuration**: Settings for Workforce Identity Federation (Entra ID).
-*   **Migration Settings**: Toggles to select what to migrate.
-*   **Google Client ID**: The OAuth client ID for Google login. *Note: This is REQUIRED for Google authentication to work.*
+4.  **Launch the Servers**:
+    Open two terminals to run the frontend and backend side-by-side:
+    *   **Terminal 1 (Vite Frontend)**:
+        ```bash
+        npm run dev
+        ```
+        The client interface will run on `http://localhost:5173`.
+    *   **Terminal 2 (Express Backend)**:
+        ```bash
+        npm run server
+        ```
+        The server API will run on `http://localhost:8080`.
 
-Example `.env` structure:
-```env
-VITE_ENABLE_ADMIN_MODE=true
-VITE_IDP_CHANGE_ENABLED=true
-VITE_GOOGLE_CLIENT_ID=your-google-client-id
-```
+---
 
-### Dynamic Configuration (Admin View Tab)
+### Option B: Cloud Run Deployment
 
-The **Admin View** tab allows you to configure the application state dynamically:
-1.  **Configure Environments**: Set Source and Target Project IDs, Locations, and App IDs.
-2.  **Fetch Assets**: Click "Fetch Source Assets" or "Fetch Target Assets" to load datastores and collections.
-3.  **Feature Flags & Mappings**: Toggle IDPs and map collections for connectors.
-4.  **Export Config**: Generates a `.env.exported` file with your current settings that you can copy into your active `.env` file.
-5.  **Import Config**: Supports loading configurations from both JSON and `.env` formats.
+You can build and deploy the container to Google Cloud Run:
 
-## 4. Deployment Instructions
+1.  **Automated Build via Cloud Build**:
+    ```bash
+    gcloud builds submit --config cloudbuild.yaml
+    ```
 
-### Running Locally
+2.  **Manual Build & Run**:
+    ```bash
+    # Build container image
+    docker build -t gcr.io/YOUR_PROJECT_ID/backup-restore-app:latest .
+    
+    # Push to Container Registry
+    docker push gcr.io/YOUR_PROJECT_ID/backup-restore-app:latest
+    
+    # Deploy to Cloud Run
+    gcloud run deploy backup-restore-app \
+        --image gcr.io/YOUR_PROJECT_ID/backup-restore-app:latest \
+        --platform managed \
+        --port 8080 \
+        --allow-unauthenticated
+    ```
 
-1. **Install Dependencies**:
-   ```bash
-   npm install
-   ```
-2. **Start Development Server**:
-   ```bash
-   npm run dev
-   ```
-   The app will be available at `http://localhost:5173`.
+---
 
-### Deployment to Cloud Run
+### Option C: GKE Deployment - WIP
 
-The application can be deployed to Cloud Run using the provided `cloudbuild.yaml` or manually.
+Kubernetes manifests are located in the `kubernetes/` directory.
 
-#### Using Cloud Build
-Run the following command to build and deploy:
-```bash
-gcloud builds submit --config cloudbuild.yaml
-```
-*Note: Cloud Build will use the project ID specified in your gcloud config.*
-
-#### Manual Deployment
-1. **Build Image**:
-   ```bash
-   docker build -t gcr.io/YOUR_PROJECT_ID/backup-restore-app .
-   ```
-2. **Push Image**:
-   ```bash
-   docker push gcr.io/YOUR_PROJECT_ID/backup-restore-app
-   ```
-3. **Deploy**:
-   ```bash
-   gcloud run deploy backup-restore-app --image gcr.io/YOUR_PROJECT_ID/backup-restore-app --platform managed
-   ```
-
-### Deployment to GKE
-
-> [!WARNING]
-> **Work In Progress (WIP)**: The GKE deployment is currently under development and testing.
-
-The application can be deployed to Google Kubernetes Engine (GKE). The Kubernetes manifests are located in the `kubernetes/` directory.
-
-#### Using Cloud Build
-The provided `cloudbuild-gke.yaml` is configured to build the image, push it to GCR, and deploy it to your GKE cluster.
-
-1.  Open `cloudbuild-gke.yaml`.
-2.  Replace `CLUSTER_NAME` and `CLUSTER_ZONE` with your GKE cluster's name and zone.
-3.  Run the build:
+1.  **Automated Deploy via Cloud Build**:
+    Open `cloudbuild-gke.yaml`, replace `CLUSTER_NAME` and `CLUSTER_ZONE` with your GKE cluster details, and execute:
     ```bash
     gcloud builds submit --config cloudbuild-gke.yaml
     ```
 
-#### Manual Deployment
-1.  **Build and Push the Image**:
-    ```bash
-    docker build -t gcr.io/YOUR_PROJECT_ID/backup-restore-app:latest .
-    docker push gcr.io/YOUR_PROJECT_ID/backup-restore-app:latest
-    ```
-2.  **Update the Image in the Manifest**:
-    Open `kubernetes/deployment.yaml` and replace `gcr.io/ancient-sandbox-322523/backup-restore-app:latest` with your image path.
-3.  **Apply the Manifests**:
-    ```bash
-    kubectl apply -f kubernetes/
-    ```
-4.  **Verify the Deployment**:
-    ```bash
-    kubectl get pods
-    kubectl get service backup-restore-app-service
-    ```
-    Wait for the external IP to be assigned to the service to access the app.
+2.  **Manual Kubernetes Manifest Application**:
+    *   Build and push the docker image to a registry.
+    *   Edit [kubernetes/deployment.yaml](file:///usr/local/google/home/wdufrin/Documents/Code/Backup_Restore_App/kubernetes/deployment.yaml) to point to your pushed image.
+    *   Configure dynamic properties if necessary.
+    *   Apply manifests to your namespace:
+        ```bash
+        kubectl apply -f kubernetes/
+        ```
+    *   Verify the ingress status:
+        ```bash
+        kubectl get ingress backup-restore-ingress
+        ```
+        Wait until an IP is assigned to resolve the domain to the cluster.
