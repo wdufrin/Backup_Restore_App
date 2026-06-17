@@ -33,7 +33,85 @@ try {
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-app.use(cors());
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : ['http://localhost:5173'];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1 || allowedOrigins.includes('*')) {
+      return callback(null, true);
+    } else {
+      return callback(new Error('Not allowed by CORS'));
+    }
+  }
+}));
+
+// --- Security Validation & Authentication ---
+const VALID_LOCATIONS = new Set([
+  'global', 'us', 'eu', 'us-central1', 'us-east1', 'us-east4', 'us-west1',
+  'europe-west1', 'europe-west3', 'europe-west9', 'asia-east1', 'asia-northeast1'
+]);
+
+const validateConfigParams = (params) => {
+  const { projectId, appLocation, collectionId, appId, assistantId } = params;
+
+  if (projectId && !/^[a-z0-9-]+$/i.test(projectId)) {
+    throw new Error('Invalid projectId format (alphanumeric and hyphens only)');
+  }
+  if (appLocation && !VALID_LOCATIONS.has(appLocation)) {
+    throw new Error('Invalid or unapproved appLocation');
+  }
+  if (collectionId && !/^[a-z0-9-_]+$/i.test(collectionId)) {
+    throw new Error('Invalid collectionId format');
+  }
+  if (appId && !/^[a-z0-9-_]+$/i.test(appId)) {
+    throw new Error('Invalid appId format');
+  }
+  if (assistantId && !/^[a-z0-9-_]+$/i.test(assistantId)) {
+    throw new Error('Invalid assistantId format');
+  }
+};
+
+const extractToken = (req) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    return authHeader.split(' ')[1];
+  }
+  return null;
+};
+
+const authenticateToken = async (req, res, next) => {
+  const token = extractToken(req);
+  if (!token) {
+    return res.status(401).json({ error: 'Unauthorized: Missing OAuth Bearer Token' });
+  }
+
+  try {
+    const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${token}`);
+    if (!response.ok) {
+      const errText = await response.text();
+      return res.status(401).json({ error: `Unauthorized: Invalid OAuth Token. Details: ${errText}` });
+    }
+
+    const tokenInfo = await response.json();
+    
+    const allowedDomain = process.env.ALLOWED_EMAIL_DOMAIN;
+    if (allowedDomain && tokenInfo.email) {
+      if (!tokenInfo.email.endsWith(`@${allowedDomain}`)) {
+        return res.status(403).json({ error: `Forbidden: Email domain must be @${allowedDomain}` });
+      }
+    }
+
+    req.token = token;
+    req.tokenInfo = tokenInfo;
+    next();
+  } catch (err) {
+    return res.status(500).json({ error: `Authentication check failed: ${err.message}` });
+  }
+};
+
 app.use(compression());
 app.use(express.json({ limit: '50mb' }));
 
@@ -129,11 +207,18 @@ async function mapConcurrent(items, concurrency, fn) {
 // --- API Endpoints ---
 
 // 1. Server-Side Backup of Agents
-app.post('/api/backup/agents', async (req, res) => {
-  const { projectId, appLocation, collectionId, appId, assistantId, accessToken, logLevel: bodyLogLevel } = req.body;
+app.post('/api/backup/agents', authenticateToken, async (req, res) => {
+  const { projectId, appLocation, collectionId, appId, assistantId, logLevel: bodyLogLevel } = req.body;
+  const accessToken = req.token;
 
-  if (!projectId || !appLocation || !collectionId || !appId || !assistantId || !accessToken) {
-    return res.status(400).json({ error: 'Missing required configuration fields or accessToken' });
+  if (!projectId || !appLocation || !collectionId || !appId || !assistantId) {
+    return res.status(400).json({ error: 'Missing required configuration fields' });
+  }
+
+  try {
+    validateConfigParams({ projectId, appLocation, collectionId, appId, assistantId });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
   }
 
   const logLevel = bodyLogLevel || process.env.VITE_LOG_LEVEL || process.env.LOG_LEVEL || 'INFO';
@@ -215,7 +300,7 @@ app.post('/api/backup/agents', async (req, res) => {
 });
 
 // 2. Server-Side Restore of Agents
-app.post('/api/restore/agents', async (req, res) => {
+app.post('/api/restore/agents', authenticateToken, async (req, res) => {
   const {
     restoreConfig,
     agents,
@@ -225,10 +310,26 @@ app.post('/api/restore/agents', async (req, res) => {
     logLevel: bodyLogLevel
   } = req.body;
 
-  const { projectId, appLocation, collectionId, appId, assistantId, accessToken } = restoreConfig;
+  const { projectId, appLocation, collectionId, appId, assistantId } = restoreConfig;
+  const accessToken = req.token;
 
-  if (!projectId || !appLocation || !collectionId || !appId || !assistantId || !accessToken) {
+  if (!projectId || !appLocation || !collectionId || !appId || !assistantId) {
     return res.status(400).json({ error: 'Missing target configuration parameters' });
+  }
+
+  try {
+    validateConfigParams({ projectId, appLocation, collectionId, appId, assistantId });
+    if (sourceConfig) {
+      validateConfigParams({
+        projectId: sourceConfig.projectId,
+        appLocation: sourceConfig.appLocation,
+        collectionId: sourceConfig.collectionId,
+        appId: sourceConfig.appId,
+        assistantId: sourceConfig.assistantId
+      });
+    }
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
   }
 
   const logLevel = bodyLogLevel || process.env.VITE_LOG_LEVEL || process.env.LOG_LEVEL || 'INFO';

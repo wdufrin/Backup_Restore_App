@@ -2345,7 +2345,8 @@ export const backupAgentsServerSide = async (config: Config, logLevel?: string) 
     const response = await fetch('/api/backup/agents', {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${config.accessToken}`
         },
         body: JSON.stringify({
             projectId: config.projectId,
@@ -2353,7 +2354,6 @@ export const backupAgentsServerSide = async (config: Config, logLevel?: string) 
             collectionId: config.collectionId || 'default_collection',
             appId: config.appId,
             assistantId: config.assistantId || 'default_assistant',
-            accessToken: config.accessToken,
             logLevel
         })
     });
@@ -2375,7 +2375,8 @@ export const restoreAgentsServerSide = async (
     const response = await fetch('/api/restore/agents', {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${restoreConfig.accessToken}`
         },
         body: JSON.stringify({
             restoreConfig: {
@@ -2383,8 +2384,7 @@ export const restoreAgentsServerSide = async (
                 appLocation: restoreConfig.appLocation,
                 collectionId: restoreConfig.collectionId || 'default_collection',
                 appId: restoreConfig.appId,
-                assistantId: restoreConfig.assistantId || 'default_assistant',
-                accessToken: restoreConfig.accessToken
+                assistantId: restoreConfig.assistantId || 'default_assistant'
             },
             agents,
             datastoreMapping,

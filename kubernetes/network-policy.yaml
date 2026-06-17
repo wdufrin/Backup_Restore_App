@@ -1,0 +1,40 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backup-restore-app-isolation
+spec:
+  podSelector:
+    matchLabels:
+      app: backup-restore-app
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Ingress: Allow traffic only from this app pod or ingress controllers
+  - from:
+    - podSelector:
+        matchLabels:
+          app: backup-restore-app
+  egress:
+  # Egress: Allow cluster DNS resolution
+  - to:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Egress: Allow HTTPS calls to Google APIs while blocking lateral VPC movement (RFC-1918)
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+    ports:
+    - protocol: TCP
+      port: 443
