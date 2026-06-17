@@ -17,8 +17,12 @@ function App() {
     import.meta.env.VITE_ENABLE_ADMIN_MODE === 'true' || 
     Array.from(new URLSearchParams(window.location.search).entries())
       .some(([key, val]) => key.toLowerCase() === 'admin' && val.toLowerCase() === 'true');
-  const sourceIdp = import.meta.env.VITE_SOURCE_IDP || 'Google';
-  const targetIdp = import.meta.env.VITE_TARGET_IDP || 'Google';
+  const [sourceIdp, setSourceIdp] = useState<string>(() => {
+    return localStorage.getItem('agentspace-sourceIdp') || import.meta.env.VITE_SOURCE_IDP || 'Google';
+  });
+  const [targetIdp, setTargetIdp] = useState<string>(() => {
+    return localStorage.getItem('agentspace-targetIdp') || import.meta.env.VITE_TARGET_IDP || 'Google';
+  });
 
   const [featureFlags, setFeatureFlags] = useState(() => {
     const saved = localStorage.getItem('agentspace-featureFlags');
@@ -118,7 +122,7 @@ function App() {
           callback: (tokenResponse: any) => {
             if (tokenResponse && tokenResponse.access_token) {
               const token = tokenResponse.access_token;
-              if (isIdpChangeEnabled) {
+              if (sourceIdp !== targetIdp) {
                 if (sourceIdp === 'Google') {
                   setSourceToken(token);
                   sessionStorage.setItem('agentspace-sourceToken', token);
@@ -183,7 +187,7 @@ function App() {
       console.log("STS Token Exchange successful!");
       
       const token = stsResponse.access_token;
-      if (isIdpChangeEnabled) {
+      if (sourceIdp !== targetIdp) {
         if (sourceIdp === 'WiF') {
           setSourceToken(token);
           sessionStorage.setItem('agentspace-sourceToken', token);
@@ -255,7 +259,8 @@ function App() {
   };
 
   const renderLoginButton = (role: 'source' | 'target') => {
-    const idp = role === 'source' ? sourceIdp : (sourceIdp === 'Google' ? 'WiF' : 'Google');
+    const idp = role === 'source' ? sourceIdp : targetIdp;
+    const isIdpChangeEnabled = sourceIdp !== targetIdp;
     
     if (idp === 'Google' && enableGoogleIdp) {
       return (
@@ -358,13 +363,17 @@ function App() {
               setGoogleClientId={setGoogleClientId}
               wifConfigState={wifConfig}
               setWifConfigState={setWifConfig}
+              sourceIdp={sourceIdp}
+              setSourceIdp={setSourceIdp}
+              targetIdp={targetIdp}
+              setTargetIdp={setTargetIdp}
             />
           ) : (
             <div className="flex flex-col items-center justify-center mt-20">
               <p className="text-gray-600 mb-4">Please sign in to access backup and restore functions.</p>
               <div className="flex gap-2 items-center">
                 {renderLoginButton('source')}
-                {renderLoginButton('target')}
+                {sourceIdp !== targetIdp && renderLoginButton('target')}
                 {isAdminModeEnabled && (
                   <button onClick={() => setIsWifModalOpen(true)} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full shadow-md transition-colors" title="WIF Configuration">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">

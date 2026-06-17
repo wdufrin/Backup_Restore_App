@@ -47,6 +47,10 @@ interface BackupPageProps {
   setGoogleClientId: (id: string) => void;
   wifConfigState: any;
   setWifConfigState: React.Dispatch<React.SetStateAction<any>>;
+  sourceIdp: string;
+  setSourceIdp: (idp: string) => void;
+  targetIdp: string;
+  setTargetIdp: (idp: string) => void;
 }
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -341,7 +345,11 @@ const BackupPage: React.FC<BackupPageProps> = ({
   googleClientId,
   setGoogleClientId,
   wifConfigState,
-  setWifConfigState
+  setWifConfigState,
+  sourceIdp,
+  setSourceIdp,
+  targetIdp,
+  setTargetIdp
 }) => {
   const [config, setConfig] = useState({
     appLocation: 'global',
@@ -515,8 +523,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
     content += `VITE_BYPASS_OWNER_FILTER=${userTabConfig.bypassOwnerFilter || false}\n`;
     content += `VITE_ENABLE_AGENT_VIEW_FALLBACK=${userTabConfig.enableAgentViewFallback || false}\n`;
     
-    const sourceIdpVal = import.meta.env.VITE_SOURCE_IDP || 'Google';
-    if (featureFlags.idpChangeEnabled) {
+    const sourceIdpVal = sourceIdp;
+    if (sourceIdpVal !== targetIdp) {
       content += `VITE_SOURCE_IDP=${sourceIdpVal}\n\n`;
     } else {
       content += `#VITE_SOURCE_IDP=${sourceIdpVal}\n\n`;
@@ -528,8 +536,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
     content += `VITE_TARGET_APP_ID=${userTabConfig.targetAppId}\n`;
     content += `VITE_TARGET_APP_URL=${userTabConfig.targetAppUrl}\n`;
     
-    const targetIdpVal = import.meta.env.VITE_TARGET_IDP || 'WiF';
-    if (featureFlags.idpChangeEnabled) {
+    const targetIdpVal = targetIdp;
+    if (sourceIdpVal !== targetIdpVal) {
       content += `VITE_TARGET_IDP=${targetIdpVal}\n\n`;
     } else {
       content += `#VITE_TARGET_IDP=${targetIdpVal}\n\n`;
@@ -654,6 +662,13 @@ const BackupPage: React.FC<BackupPageProps> = ({
             setGoogleClientId(config.VITE_GOOGLE_CLIENT_ID);
           }
 
+          if (config.VITE_SOURCE_IDP) {
+            setSourceIdp(config.VITE_SOURCE_IDP);
+          }
+          if (config.VITE_TARGET_IDP) {
+            setTargetIdp(config.VITE_TARGET_IDP);
+          }
+
           if (config.VITE_MIGRATE_AGENTS) {
             setShouldMigrateAgents(config.VITE_MIGRATE_AGENTS === 'true');
           }
@@ -688,6 +703,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
     localStorage.setItem('agentspace-shouldMigrateNotebooks', String(shouldMigrateNotebooks));
     localStorage.setItem('agentspace-datastoreMapping', JSON.stringify(datastoreMapping));
     localStorage.setItem('agentspace-collectionMapping', JSON.stringify(collectionMapping));
+    localStorage.setItem('agentspace-sourceIdp', sourceIdp);
+    localStorage.setItem('agentspace-targetIdp', targetIdp);
     addLog(`Admin configuration saved to browser storage.`);
   };
 
@@ -700,6 +717,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
     localStorage.removeItem('agentspace-shouldMigrateNotebooks');
     localStorage.removeItem('agentspace-datastoreMapping');
     localStorage.removeItem('agentspace-collectionMapping');
+    localStorage.removeItem('agentspace-sourceIdp');
+    localStorage.removeItem('agentspace-targetIdp');
     setUserTabConfig({
       sourceProject: import.meta.env.VITE_SOURCE_PROJECT || '',
       sourceLocation: import.meta.env.VITE_SOURCE_LOCATION || 'global',
@@ -723,6 +742,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
       authEndpoint: import.meta.env.VITE_WIF_AUTH_ENDPOINT || '',
       redirectUri: import.meta.env.VITE_WIF_REDIRECT_URI || '',
     });
+    setSourceIdp(import.meta.env.VITE_SOURCE_IDP || 'Google');
+    setTargetIdp(import.meta.env.VITE_TARGET_IDP || 'Google');
     setShouldMigrateAgents(import.meta.env.VITE_MIGRATE_AGENTS !== 'false');
     setShouldMigrateNotebooks(import.meta.env.VITE_MIGRATE_NOTEBOOKS !== 'false');
 
@@ -1600,8 +1621,6 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
 
 
   const handleSingleClickMigration = async () => executeOperation('MigrateUserData', async () => {
-    const sourceIdp = import.meta.env.VITE_SOURCE_IDP || 'Google';
-    const targetIdp = import.meta.env.VITE_TARGET_IDP || 'Google';
     const isIdpChangeEnabled = sourceIdp !== targetIdp;
 
     if (isIdpChangeEnabled) {
@@ -3790,7 +3809,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             {/* Source Config */}
             <div className="bg-gray-50 dark:bg-slate-700 p-4 rounded-lg border border-gray-200 dark:border-slate-600">
               <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-3">Source Environment</h3>
-              <div className="grid grid-cols-4 gap-4 items-end">
+              <div className="grid grid-cols-5 gap-4 items-end">
                 <div>
                   <label className="block text-xs text-gray-500 dark:text-white mb-1">Project ID</label>
                   <div className="flex gap-1">
@@ -3828,6 +3847,17 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                     <option value="global">global</option>
                     <option value="eu">eu</option>
                     <option value="us">us</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 dark:text-white mb-1">Identity Provider (IDP)</label>
+                  <select 
+                    value={sourceIdp} 
+                    onChange={(e) => setSourceIdp(e.target.value)}
+                    className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white"
+                  >
+                    <option value="Google">Google</option>
+                    <option value="WiF">WiF</option>
                   </select>
                 </div>
                 <div>
@@ -3888,7 +3918,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             {/* Target Config */}
             <div className="bg-gray-50 dark:bg-slate-700 p-4 rounded-lg border border-gray-200 dark:border-slate-600">
               <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-3">Target Environment</h3>
-              <div className="grid grid-cols-4 gap-4 items-end">
+              <div className="grid grid-cols-5 gap-4 items-end">
                 <div>
                   <label className="block text-xs text-gray-500 dark:text-white mb-1">Project ID</label>
                   <div className="flex gap-1">
@@ -3926,6 +3956,17 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                     <option value="global">global</option>
                     <option value="eu">eu</option>
                     <option value="us">us</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 dark:text-white mb-1">Identity Provider (IDP)</label>
+                  <select 
+                    value={targetIdp} 
+                    onChange={(e) => setTargetIdp(e.target.value)}
+                    className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white"
+                  >
+                    <option value="Google">Google</option>
+                    <option value="WiF">WiF</option>
                   </select>
                 </div>
                 <div>
