@@ -50,11 +50,11 @@ const getLogLevel = (message) => {
   if (upper.includes('[DEBUG]') || upper.includes('DEBUG:')) {
     return 'DEBUG';
   }
-  if (upper.includes('ERROR:') || upper.includes('FAILED') || upper.includes('FATAL') || upper.includes('CRITICAL')) {
-    return 'ERROR';
-  }
   if (upper.includes('WARNING:') || upper.includes('WARN:') || upper.includes('WARNING')) {
     return 'WARN';
+  }
+  if (upper.includes('ERROR:') || upper.includes('FAILED') || upper.includes('FATAL') || upper.includes('CRITICAL')) {
+    return 'ERROR';
   }
   return 'INFO';
 };
