@@ -27,8 +27,13 @@ steps:
       - '--platform=managed'
       - '--image=gcr.io/$PROJECT_ID/backup-restore-app:$COMMIT_SHA'
       - '--region=us-central1'
+      - '--set-env-vars=ALLOWED_ORIGINS=$_ALLOWED_ORIGINS,ALLOWED_EMAIL_DOMAIN=$_ALLOWED_EMAIL_DOMAIN'
       - '--quiet'
     id: Deploy
+
+substitutions:
+  _ALLOWED_ORIGINS: 'http://localhost:5173'
+  _ALLOWED_EMAIL_DOMAIN: ''
 
 images:
   - 'gcr.io/$PROJECT_ID/backup-restore-app:$COMMIT_SHA'
