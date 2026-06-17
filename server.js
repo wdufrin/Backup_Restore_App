@@ -3,9 +3,32 @@ import cors from 'cors';
 import compression from 'compression';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Load environment variables from .env file if it exists
+try {
+  const envPath = path.join(__dirname, '.env');
+  if (fs.existsSync(envPath)) {
+    const envConfig = fs.readFileSync(envPath, 'utf8');
+    envConfig.split('\n').forEach(line => {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith('#')) {
+        const parts = trimmed.split('=');
+        if (parts.length >= 2) {
+          const key = parts[0].trim();
+          const value = parts.slice(1).join('=').trim().replace(/^['"]|['"]$/g, '');
+          process.env[key] = value;
+        }
+      }
+    });
+  }
+} catch (err) {
+  console.error('Error loading .env file:', err);
+}
+
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -13,6 +36,35 @@ const PORT = process.env.PORT || 8080;
 app.use(cors());
 app.use(compression());
 app.use(express.json({ limit: '50mb' }));
+
+// --- Logging Configuration and Helpers ---
+const LEVEL_VALUES = {
+  DEBUG: 0,
+  INFO: 1,
+  WARN: 2,
+  ERROR: 3
+};
+
+const getLogLevel = (message) => {
+  const upper = message.toUpperCase();
+  if (upper.includes('[DEBUG]') || upper.includes('DEBUG:')) {
+    return 'DEBUG';
+  }
+  if (upper.includes('ERROR:') || upper.includes('FAILED') || upper.includes('FATAL') || upper.includes('CRITICAL')) {
+    return 'ERROR';
+  }
+  if (upper.includes('WARNING:') || upper.includes('WARN:') || upper.includes('WARNING')) {
+    return 'WARN';
+  }
+  return 'INFO';
+};
+
+const shouldLog = (message, currentLevel) => {
+  const msgLevel = getLogLevel(message);
+  const msgVal = LEVEL_VALUES[msgLevel] ?? 1;
+  const currentVal = LEVEL_VALUES[currentLevel.toUpperCase()] ?? 1;
+  return msgVal >= currentVal;
+};
 
 // Helper to determine base URL for Discovery Engine
 const getDiscoveryEngineUrl = (location) => {
@@ -78,14 +130,21 @@ async function mapConcurrent(items, concurrency, fn) {
 
 // 1. Server-Side Backup of Agents
 app.post('/api/backup/agents', async (req, res) => {
-  const { projectId, appLocation, collectionId, appId, assistantId, accessToken } = req.body;
+  const { projectId, appLocation, collectionId, appId, assistantId, accessToken, logLevel: bodyLogLevel } = req.body;
 
   if (!projectId || !appLocation || !collectionId || !appId || !assistantId || !accessToken) {
     return res.status(400).json({ error: 'Missing required configuration fields or accessToken' });
   }
 
+  const logLevel = bodyLogLevel || process.env.VITE_LOG_LEVEL || process.env.LOG_LEVEL || 'INFO';
   const logs = [];
-  const addLog = (msg) => logs.push(`[${new Date().toISOString()}] ${msg}`);
+  const addLog = (msg) => {
+    if (shouldLog(msg, logLevel)) {
+      const formatted = `[${new Date().toISOString()}] ${msg}`;
+      logs.push(formatted);
+      console.log(formatted);
+    }
+  };
 
   try {
     addLog(`Starting server-side backup for agents in Assistant: ${assistantId}...`);
@@ -162,7 +221,8 @@ app.post('/api/restore/agents', async (req, res) => {
     agents,
     datastoreMapping = {},
     collectionMapping = {},
-    sourceConfig = null
+    sourceConfig = null,
+    logLevel: bodyLogLevel
   } = req.body;
 
   const { projectId, appLocation, collectionId, appId, assistantId, accessToken } = restoreConfig;
@@ -171,8 +231,15 @@ app.post('/api/restore/agents', async (req, res) => {
     return res.status(400).json({ error: 'Missing target configuration parameters' });
   }
 
+  const logLevel = bodyLogLevel || process.env.VITE_LOG_LEVEL || process.env.LOG_LEVEL || 'INFO';
   const logs = [];
-  const addLog = (msg) => logs.push(`[${new Date().toISOString()}] ${msg}`);
+  const addLog = (msg) => {
+    if (shouldLog(msg, logLevel)) {
+      const formatted = `[${new Date().toISOString()}] ${msg}`;
+      logs.push(formatted);
+      console.log(formatted);
+    }
+  };
 
   try {
     addLog(`Starting server-side restore of ${agents.length} agent(s)...`);

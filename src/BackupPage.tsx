@@ -25,6 +25,29 @@ import ChatHistoryArchiveViewer from './components/backup/ChatHistoryArchiveView
 import ClientSecretPrompt from './components/backup/ClientSecretPrompt';
 import CurlInfoModal from './components/CurlInfoModal';
 
+type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
+
+const LEVEL_VALUES: Record<LogLevel, number> = {
+  DEBUG: 0,
+  INFO: 1,
+  WARN: 2,
+  ERROR: 3
+};
+
+const getLogLevel = (message: string): LogLevel => {
+  const upper = message.toUpperCase();
+  if (upper.includes('[DEBUG]') || upper.includes('DEBUG:')) {
+    return 'DEBUG';
+  }
+  if (upper.includes('ERROR:') || upper.includes('FAILED') || upper.includes('FATAL') || upper.includes('CRITICAL')) {
+    return 'ERROR';
+  }
+  if (upper.includes('WARNING:') || upper.includes('WARN:') || upper.includes('WARNING')) {
+    return 'WARN';
+  }
+  return 'INFO';
+};
+
 
 
 interface BackupPageProps {
@@ -391,6 +414,10 @@ const BackupPage: React.FC<BackupPageProps> = ({
     };
   });
   const [isUserConfigModalOpen, setIsUserConfigModalOpen] = useState(false);
+  const [logLevel, setLogLevel] = useState<LogLevel>(() => {
+    const saved = localStorage.getItem('agentspace-logLevel');
+    return (saved as LogLevel) || (import.meta.env.VITE_LOG_LEVEL as LogLevel) || 'INFO';
+  });
   const [sourceApps, setSourceApps] = useState<any[]>([]);
   const [targetApps, setTargetApps] = useState<any[]>([]);
   const [sourceDatastores, setSourceDatastores] = useState<any[]>([]);
@@ -514,7 +541,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
     content += `VITE_IDP_CHANGE_ENABLED=${featureFlags.idpChangeEnabled}\n`;
     content += `VITE_ENABLE_GOOGLE_IDP=${featureFlags.enableGoogleIdp}\n`;
     content += `VITE_ENABLE_WIF_IDP=${featureFlags.enableWifIdp}\n`;
-    content += `VITE_GOOGLE_CLIENT_ID=${googleClientId}\n\n`;
+    content += `VITE_GOOGLE_CLIENT_ID=${googleClientId}\n`;
+    content += `VITE_LOG_LEVEL=${logLevel}\n\n`;
 
     content += `# --- Source Environment ---\n`;
     content += `VITE_SOURCE_PROJECT=${userTabConfig.sourceProject}\n`;
@@ -592,6 +620,9 @@ const BackupPage: React.FC<BackupPageProps> = ({
               fetchAppsForProject(json.userTabConfig.targetProject, targetLoc, targetToken || accessToken).then(apps => setTargetApps(apps));
             }
           }
+          if (json.logLevel) {
+            setLogLevel(json.logLevel as LogLevel);
+          }
           if (json.datastoreMapping) {
             setDatastoreMapping(json.datastoreMapping);
           }
@@ -662,6 +693,10 @@ const BackupPage: React.FC<BackupPageProps> = ({
             setGoogleClientId(config.VITE_GOOGLE_CLIENT_ID);
           }
 
+          if (config.VITE_LOG_LEVEL) {
+            setLogLevel(config.VITE_LOG_LEVEL as LogLevel);
+          }
+
           if (config.VITE_SOURCE_IDP) {
             setSourceIdp(config.VITE_SOURCE_IDP);
           }
@@ -705,6 +740,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
     localStorage.setItem('agentspace-collectionMapping', JSON.stringify(collectionMapping));
     localStorage.setItem('agentspace-sourceIdp', sourceIdp);
     localStorage.setItem('agentspace-targetIdp', targetIdp);
+    localStorage.setItem('agentspace-logLevel', logLevel);
     addLog(`Admin configuration saved to browser storage.`);
   };
 
@@ -719,6 +755,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
     localStorage.removeItem('agentspace-collectionMapping');
     localStorage.removeItem('agentspace-sourceIdp');
     localStorage.removeItem('agentspace-targetIdp');
+    localStorage.removeItem('agentspace-logLevel');
     setUserTabConfig({
       sourceProject: import.meta.env.VITE_SOURCE_PROJECT || '',
       sourceLocation: import.meta.env.VITE_SOURCE_LOCATION || 'global',
@@ -746,6 +783,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
     setTargetIdp(import.meta.env.VITE_TARGET_IDP || 'Google');
     setShouldMigrateAgents(import.meta.env.VITE_MIGRATE_AGENTS !== 'false');
     setShouldMigrateNotebooks(import.meta.env.VITE_MIGRATE_NOTEBOOKS !== 'false');
+    setLogLevel((import.meta.env.VITE_LOG_LEVEL as LogLevel) || 'INFO');
 
     const envDsMapping = import.meta.env.VITE_DATASTORE_MAPPING;
     try {
@@ -1089,7 +1127,10 @@ const BackupPage: React.FC<BackupPageProps> = ({
   };
   
   const addLog = (message: string) => {
+    const msgLevel = getLogLevel(message);
+    if (LEVEL_VALUES[msgLevel] >= LEVEL_VALUES[logLevel]) {
       setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${message}`]);
+    }
   };
 
   // --- Effects to fetch dropdown data ---
@@ -1379,7 +1420,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
     }
     addLog(`Starting server-side backup for agents in Assistant: ${apiConfig.assistantId}...`);
     
-    const result = await api.backupAgentsServerSide({ ...apiConfig, accessToken });
+    const result = await api.backupAgentsServerSide({ ...apiConfig, accessToken }, logLevel);
     if (result.logs) {
       result.logs.forEach((log: string) => addLog(`  [Server] ${log}`));
     }
@@ -2769,7 +2810,8 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
         agents,
         datastoreMapping,
         collectionMapping,
-        sourceConfig
+        sourceConfig,
+        logLevel
       );
       if (result.logs) {
         result.logs.forEach((log: string) => addLog(`  [Server] ${log}`));
@@ -4197,6 +4239,26 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                       Falls back to structural detection and IAM queries if getAgentView returns a permission failure.
                     </p>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Logging Settings */}
+            <div className="bg-gray-50 dark:bg-slate-700 p-4 rounded-lg border border-gray-200 dark:border-slate-600">
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-3">Logging Settings</h3>
+              <div className="grid grid-cols-5 gap-4">
+                <div className="col-span-2">
+                  <label className="block text-xs text-gray-500 dark:text-white mb-1">Logging Level</label>
+                  <select 
+                    value={logLevel} 
+                    onChange={(e) => setLogLevel(e.target.value as LogLevel)}
+                    className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white"
+                  >
+                    <option value="DEBUG">DEBUG (Verbose)</option>
+                    <option value="INFO">INFO (Standard)</option>
+                    <option value="WARN">WARN (Warnings & Errors)</option>
+                    <option value="ERROR">ERROR (Errors Only)</option>
+                  </select>
                 </div>
               </div>
             </div>

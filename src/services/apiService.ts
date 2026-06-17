@@ -2341,7 +2341,7 @@ export const getUserInfo = async (accessToken: string) => {
     return response.json();
 };
 
-export const backupAgentsServerSide = async (config: Config) => {
+export const backupAgentsServerSide = async (config: Config, logLevel?: string) => {
     const response = await fetch('/api/backup/agents', {
         method: 'POST',
         headers: {
@@ -2353,7 +2353,8 @@ export const backupAgentsServerSide = async (config: Config) => {
             collectionId: config.collectionId || 'default_collection',
             appId: config.appId,
             assistantId: config.assistantId || 'default_assistant',
-            accessToken: config.accessToken
+            accessToken: config.accessToken,
+            logLevel
         })
     });
     if (!response.ok) {
@@ -2368,7 +2369,8 @@ export const restoreAgentsServerSide = async (
     agents: Agent[],
     datastoreMapping: Record<string, string>,
     collectionMapping: Record<string, string>,
-    sourceConfig?: any
+    sourceConfig?: any,
+    logLevel?: string
 ) => {
     const response = await fetch('/api/restore/agents', {
         method: 'POST',
@@ -2387,7 +2389,8 @@ export const restoreAgentsServerSide = async (
             agents,
             datastoreMapping,
             collectionMapping,
-            sourceConfig
+            sourceConfig,
+            logLevel
         })
     });
     if (!response.ok) {
