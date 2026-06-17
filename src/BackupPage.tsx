@@ -1541,63 +1541,69 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
     } while (pageToken);
 
     // Fetch IAM policies and categorize, while filtering ONLY low-code agents
-    const userAgents = [];
-    let agentIndex = 0;
-    for (const agent of agents) {
-      agentIndex++;
-      setProgress({
-        percent: 10 + Math.round((agentIndex / agents.length) * 35),
-        text: `Fetching agent details (${agentIndex}/${agents.length}): ${agent.displayName || agent.name}...`
-      });
-      try {
-        // 1. Fetch Agent View to check type
-        let isLowCode = true;
+    const userAgents: any[] = [];
+    const BATCH_SIZE = 10;
+    let resolvedAgentCount = 0;
+
+    for (let i = 0; i < agents.length; i += BATCH_SIZE) {
+      const batch = agents.slice(i, i + BATCH_SIZE);
+      await Promise.allSettled(batch.map(async (agent) => {
         try {
-          const rawResponse = await api.getAgentView(agent.name, sourceConfig);
-          const agentView = rawResponse?.agentView || rawResponse;
-          const rawAgentType = agentView?.agentType;
-          if (rawAgentType && rawAgentType !== 'LOW_CODE' && rawAgentType !== 'Low Code') {
-            isLowCode = false;
+          // 1. Fetch Agent View to check type
+          let isLowCode = true;
+          try {
+            const rawResponse = await api.getAgentView(agent.name, sourceConfig);
+            const agentView = rawResponse?.agentView || rawResponse;
+            const rawAgentType = agentView?.agentType;
+            if (rawAgentType && rawAgentType !== 'LOW_CODE' && rawAgentType !== 'Low Code') {
+              isLowCode = false;
+            }
+          } catch (viewErr) {
+            // Structural detection fallback if Agent View fetch fails and fallback is enabled
+            if (userTabConfig.enableAgentViewFallback) {
+              if (agent.adkAgentDefinition || agent.a2aAgentDefinition) {
+                isLowCode = false;
+              }
+            } else {
+              isLowCode = false; // Skip if fallback is disabled
+            }
           }
-        } catch (viewErr) {
-          // Structural detection fallback if Agent View fetch fails and fallback is enabled
+
+          if (!isLowCode) {
+            if (isDebugMode) {
+              addLog(`[DEBUG] Skipping non-low-code agent ${agent.displayName || agent.name} from backup.`);
+            }
+            return;
+          }
+
+          const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
+          const agentWithPolicy = { ...agent, iamPolicy: policy, agentType: 'Low Code' };
+          const isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId);
+          (agentWithPolicy as any).category = isOwned ? 'core' : 'optional';
+          userAgents.push(agentWithPolicy);
+        } catch (e) {
           if (userTabConfig.enableAgentViewFallback) {
+            // Fallback: check structural type before adding as optional
+            let isLowCode = true;
             if (agent.adkAgentDefinition || agent.a2aAgentDefinition) {
               isLowCode = false;
             }
+            if (isLowCode) {
+              addLog(`  - Warning: Failed to backup IAM policy for agent ${agent.name}: ${(e as any).message}`);
+              const agentCopy = { ...agent, category: 'optional' };
+              userAgents.push(agentCopy);
+            }
           } else {
-            isLowCode = false; // Skip if fallback is disabled
+            addLog(`  - Warning: Failed to backup agent ${agent.displayName || agent.name} due to view/policy fetch error: ${(e as any).message}. Skipping agent.`);
           }
+        } finally {
+          resolvedAgentCount++;
+          setProgress({
+            percent: 10 + Math.round((resolvedAgentCount / agents.length) * 35),
+            text: `Fetching agent details (${resolvedAgentCount}/${agents.length}): ${agent.displayName || agent.name}...`
+          });
         }
-
-        if (!isLowCode) {
-          if (isDebugMode) {
-            addLog(`[DEBUG] Skipping non-low-code agent ${agent.displayName || agent.name} from backup.`);
-          }
-          continue;
-        }
-
-        const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
-        const agentWithPolicy = { ...agent, iamPolicy: policy, agentType: 'Low Code' };
-        const isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId);
-        (agentWithPolicy as any).category = isOwned ? 'core' : 'optional';
-        userAgents.push(agentWithPolicy);
-      } catch (e) {
-        if (userTabConfig.enableAgentViewFallback) {
-          // Fallback: check structural type before adding as optional
-          let isLowCode = true;
-          if (agent.adkAgentDefinition || agent.a2aAgentDefinition) {
-            isLowCode = false;
-          }
-          if (isLowCode) {
-            addLog(`  - Warning: Failed to backup IAM policy for agent ${agent.name}: ${(e as any).message}`);
-            (agent as any).category = 'optional';
-            userAgents.push(agent);
-          }
-        } else {
-          addLog(`  - Warning: Failed to backup agent ${agent.displayName || agent.name} due to view/policy fetch error: ${(e as any).message}. Skipping agent.`);
-        }
-      }
+      }));
     }
     addLog(`Found ${userAgents.length} agents in selected engine.`);
     if (isDebugMode) {
@@ -1772,168 +1778,105 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
     const selectableAgents: any[] = [];
 
     addLog(`Fetching and analyzing agents via Agent View...`);
-    let agentIndex = 0;
-    for (const agent of agents) {
-      agentIndex++;
-      setProgress({
-        percent: 20 + Math.round((agentIndex / agents.length) * 35),
-        text: `Analyzing source agent (${agentIndex}/${agents.length}): ${agent.displayName || agent.name}...`
-      });
-      try {
-        // 1. Fetch Agent View for exact type and owner details
-        const rawResponse = await api.getAgentView(agent.name, sourceConfig);
-        const agentView = rawResponse?.agentView || rawResponse;
-        
-        if (isDebugMode) {
-          addLog(`[DEBUG] Agent View for ${agent.displayName}: ${JSON.stringify(rawResponse, null, 2)}`);
-        }
+    const BATCH_SIZE = 10;
+    let resolvedAgentCount = 0;
 
-        const rawAgentType = agentView?.agentType;
-        
-        // Skip if it is explicitly ADK or A2A or not LOW_CODE
-        if (rawAgentType && rawAgentType !== 'LOW_CODE' && rawAgentType !== 'Low Code') {
-          if (isDebugMode) {
-            addLog(`[DEBUG] Skipping non-low-code agent ${agent.displayName || agent.name} (Type: ${rawAgentType}) from migration.`);
-          }
-          continue;
-        }
-
-        // If rawAgentType is missing, perform structural fallback check
-        if (!rawAgentType && (agent.adkAgentDefinition || agent.a2aAgentDefinition)) {
-          if (isDebugMode) {
-            addLog(`[DEBUG] Structural Fallback: Skipping non-low-code agent ${agent.displayName || agent.name} from migration.`);
-          }
-          continue;
-        }
-
-        // 2. Fetch IAM Policy
-        let policy: any = null;
+    for (let i = 0; i < agents.length; i += BATCH_SIZE) {
+      const batch = agents.slice(i, i + BATCH_SIZE);
+      await Promise.allSettled(batch.map(async (agent) => {
         try {
-          policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
-        } catch (policyErr: any) {
-          if (isDebugMode) {
-            addLog(`    - Warning: Failed to fetch IAM policy: ${policyErr.message}`);
-          }
-        }
-
-        // 3. Resolve Owner
-        const agentOwner = agentView?.ownerUserPrincipal || agentView?.ownerDisplayName || agentView?.agentOwner || agentView?.owner;
-        let isOwned = false;
-        let hasOwner = false;
-
-        if (agentOwner) {
-          hasOwner = true;
-          isOwned = agentOwner.toLowerCase().includes(userEmail.toLowerCase()) || 
-                    (userSub && agentOwner.includes(userSub));
+          // 1. Fetch Agent View for exact type and owner details
+          const rawResponse = await api.getAgentView(agent.name, sourceConfig);
+          const agentView = rawResponse?.agentView || rawResponse;
           
-          // Prefix-based matching fallback to handle workforce pools and domain mismatches gracefully
-          if (!isOwned && userEmail) {
-            const prefix = userEmail.split('@')[0].toLowerCase();
-            if (prefix && prefix.length > 2) {
-              isOwned = agentOwner.toLowerCase().includes(prefix);
+          if (isDebugMode) {
+            addLog(`[DEBUG] Agent View for ${agent.displayName}: ${JSON.stringify(rawResponse, null, 2)}`);
+          }
+
+          const rawAgentType = agentView?.agentType;
+          
+          // Skip if it is explicitly ADK or A2A or not LOW_CODE
+          if (rawAgentType && rawAgentType !== 'LOW_CODE' && rawAgentType !== 'Low Code') {
+            if (isDebugMode) {
+              addLog(`[DEBUG] Skipping non-low-code agent ${agent.displayName || agent.name} (Type: ${rawAgentType}) from migration.`);
+            }
+            return;
+          }
+
+          // If rawAgentType is missing, perform structural fallback check
+          if (!rawAgentType && (agent.adkAgentDefinition || agent.a2aAgentDefinition)) {
+            if (isDebugMode) {
+              addLog(`[DEBUG] Structural Fallback: Skipping non-low-code agent ${agent.displayName || agent.name} from migration.`);
+            }
+            return;
+          }
+
+          // 2. Fetch IAM Policy
+          let policy: any = null;
+          try {
+            policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
+          } catch (policyErr: any) {
+            if (isDebugMode) {
+              addLog(`    - Warning: Failed to fetch IAM policy: ${policyErr.message}`);
             }
           }
-        } else if (policy && policy.bindings) {
-          const ownerBinding = policy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
-          if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
+
+          // 3. Resolve Owner
+          const agentOwner = agentView?.ownerUserPrincipal || agentView?.ownerDisplayName || agentView?.agentOwner || agentView?.owner;
+          let isOwned = false;
+          let hasOwner = false;
+
+          if (agentOwner) {
             hasOwner = true;
-            const firstMember = ownerBinding.members[0];
-            isOwned = firstMember.toLowerCase().includes(userEmail.toLowerCase()) ||
-                      (userSub && firstMember.includes(userSub)) ||
-                      (poolId && firstMember.includes(poolId));
+            isOwned = agentOwner.toLowerCase().includes(userEmail.toLowerCase()) || 
+                      (userSub && agentOwner.includes(userSub));
             
-            // Prefix-based matching fallback
+            // Prefix-based matching fallback to handle workforce pools and domain mismatches gracefully
             if (!isOwned && userEmail) {
               const prefix = userEmail.split('@')[0].toLowerCase();
               if (prefix && prefix.length > 2) {
-                isOwned = firstMember.toLowerCase().includes(prefix);
+                isOwned = agentOwner.toLowerCase().includes(prefix);
+              }
+            }
+          } else if (policy && policy.bindings) {
+            const ownerBinding = policy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
+            if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
+              hasOwner = true;
+              const firstMember = ownerBinding.members[0];
+              isOwned = firstMember.toLowerCase().includes(userEmail.toLowerCase()) ||
+                        (userSub && firstMember.includes(userSub)) ||
+                        (poolId && firstMember.includes(poolId));
+              
+              // Prefix-based matching fallback
+              if (!isOwned && userEmail) {
+                const prefix = userEmail.split('@')[0].toLowerCase();
+                if (prefix && prefix.length > 2) {
+                  isOwned = firstMember.toLowerCase().includes(prefix);
+                }
               }
             }
           }
-        }
 
-        const enrichedAgent = { 
-          ...agent, 
-          agentType: 'Low Code',
-          iamPolicy: policy
-        };
-        fullBackupAgents.push(enrichedAgent);
-
-        // Only show WIF user-owned agents OR shared/unowned agents (no explicit owner)
-        if (isOwned || !hasOwner) {
-          const collision = await checkAgentCollision(
-            enrichedAgent,
-            targetAgents,
-            targetConfig,
-            userEmail,
-            userSub,
-            poolId,
-            addLog
-          );
-          const disabled = collision.disabled;
-          const disabledReason = collision.disabledReason;
-
-          selectableAgents.push({
-            name: agent.name,
-            displayName: agent.displayName,
+          const enrichedAgent = { 
+            ...agent, 
             agentType: 'Low Code',
-            disabled,
-            disabledReason,
-            category: isOwned ? 'core' : 'optional'
-          });
-        }
-      } catch (e: any) {
-        if (userTabConfig.enableAgentViewFallback) {
-          addLog(`  - Warning: Failed to fetch Agent View for agent ${agent.displayName || agent.name}: ${e.message}. Attempting structural & IAM policy fallback...`);
-          
-          // 1. Structural Type Check
-          let agentType = "Low Code";
-          if (agent.adkAgentDefinition) agentType = "ADK";
-          else if (agent.a2aAgentDefinition) agentType = "A2A";
-
-          if (agentType !== 'Low Code') {
-            if (isDebugMode) {
-              addLog(`[DEBUG] Fallback: Skipping non-low-code agent ${agent.displayName || agent.name} (Type: ${agentType}) from migration.`);
-            }
-            continue;
-          }
-
-          // 2. IAM Policy Owner Check
-          let isOwned = false;
-          let hasOwner = false;
-          let agentWithPolicy: any = { ...agent };
-          try {
-            const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
-            agentWithPolicy = { ...agent, iamPolicy: policy };
-            
-            isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId);
-            
-            if (policy && policy.bindings) {
-              const ownerBinding = policy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
-              if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
-                hasOwner = true;
-              }
-            }
-            
-            fullBackupAgents.push(agentWithPolicy);
-          } catch (policyErr: any) {
-            addLog(`    - Warning: Failed to fetch IAM policy for fallback: ${policyErr.message}`);
-            fullBackupAgents.push(agent);
-          }
+            iamPolicy: policy
+          };
+          fullBackupAgents.push(enrichedAgent);
 
           // Only show WIF user-owned agents OR shared/unowned agents (no explicit owner)
           if (isOwned || !hasOwner) {
-             const collision = await checkAgentCollision(
-               agentWithPolicy,
-               targetAgents,
-               targetConfig,
-               userEmail,
-               userSub,
-               poolId,
-               addLog
-             );
-             const disabled = collision.disabled;
-             const disabledReason = collision.disabledReason;
+            const collision = await checkAgentCollision(
+              enrichedAgent,
+              targetAgents,
+              targetConfig,
+              userEmail,
+              userSub,
+              poolId,
+              addLog
+            );
+            const disabled = collision.disabled;
+            const disabledReason = collision.disabledReason;
 
             selectableAgents.push({
               name: agent.name,
@@ -1944,10 +1887,79 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               category: isOwned ? 'core' : 'optional'
             });
           }
-        } else {
-          addLog(`  - Warning: Failed to fetch Agent View for agent ${agent.displayName || agent.name}: ${e.message}. Skipping agent.`);
+        } catch (e: any) {
+          if (userTabConfig.enableAgentViewFallback) {
+            addLog(`  - Warning: Failed to fetch Agent View for agent ${agent.displayName || agent.name}: ${e.message}. Attempting structural & IAM policy fallback...`);
+            
+            // 1. Structural Type Check
+            let agentType = "Low Code";
+            if (agent.adkAgentDefinition) agentType = "ADK";
+            else if (agent.a2aAgentDefinition) agentType = "A2A";
+
+            if (agentType !== 'Low Code') {
+              if (isDebugMode) {
+                addLog(`[DEBUG] Fallback: Skipping non-low-code agent ${agent.displayName || agent.name} (Type: ${agentType}) from migration.`);
+              }
+              return;
+            }
+
+            // 2. IAM Policy Owner Check
+            let isOwned = false;
+            let hasOwner = false;
+            let agentWithPolicy: any = { ...agent };
+            try {
+              const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
+              agentWithPolicy = { ...agent, iamPolicy: policy };
+              
+              isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId);
+              
+              if (policy && policy.bindings) {
+                const ownerBinding = policy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
+                if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
+                  hasOwner = true;
+                }
+              }
+              
+              fullBackupAgents.push(agentWithPolicy);
+            } catch (policyErr: any) {
+              addLog(`    - Warning: Failed to fetch IAM policy for fallback: ${policyErr.message}`);
+              fullBackupAgents.push(agent);
+            }
+
+            // Only show WIF user-owned agents OR shared/unowned agents (no explicit owner)
+            if (isOwned || !hasOwner) {
+               const collision = await checkAgentCollision(
+                 agentWithPolicy,
+                 targetAgents,
+                 targetConfig,
+                 userEmail,
+                 userSub,
+                 poolId,
+                 addLog
+               );
+               const disabled = collision.disabled;
+               const disabledReason = collision.disabledReason;
+
+              selectableAgents.push({
+                name: agent.name,
+                displayName: agent.displayName,
+                agentType: 'Low Code',
+                disabled,
+                disabledReason,
+                category: isOwned ? 'core' : 'optional'
+              });
+            }
+          } else {
+            addLog(`  - Warning: Failed to fetch Agent View for agent ${agent.displayName || agent.name}: ${e.message}. Skipping agent.`);
+          }
+        } finally {
+          resolvedAgentCount++;
+          setProgress({
+            percent: 20 + Math.round((resolvedAgentCount / agents.length) * 35),
+            text: `Analyzing source agent (${resolvedAgentCount}/${agents.length}): ${agent.displayName || agent.name}...`
+          });
         }
-      }
+      }));
     }
 
     setProgress({ percent: 60, text: 'Fetching notebooks...' });
