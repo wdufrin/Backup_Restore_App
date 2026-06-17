@@ -809,6 +809,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
   const [loadingSection, setLoadingSection] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
+  const [progress, setProgress] = useState<{ percent: number; text: string } | null>(null);
   
   // GCS State
   const [buckets, setBuckets] = useState<GcsBucket[]>([]);
@@ -1358,11 +1359,14 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
       setLoadingSection(section);
       setError(null);
       setLogs([]);
+      setProgress({ percent: 0, text: 'Initializing operation...' });
       try {
           await operation();
+          setProgress({ percent: 100, text: 'Operation completed successfully!' });
       } catch (err: any) {
           setError(err.message || `An unknown error occurred in ${section}.`);
           addLog(`FATAL ERROR: ${err.message}`);
+          setProgress(prev => prev ? { ...prev, text: `Failed: ${err.message}` } : null);
       } finally {
           setIsLoading(false);
           setLoadingSection(null);
@@ -1526,6 +1530,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
     }
 
     // 1. Backup Agents
+    setProgress({ percent: 5, text: 'Fetching agents from source...' });
     addLog(`Fetching agents from ${sourceConfig.appId} in ${sourceConfig.appLocation}...`);
     const agents: Agent[] = [];
     let pageToken: string | undefined = undefined;
@@ -1537,7 +1542,13 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
 
     // Fetch IAM policies and categorize, while filtering ONLY low-code agents
     const userAgents = [];
+    let agentIndex = 0;
     for (const agent of agents) {
+      agentIndex++;
+      setProgress({
+        percent: 10 + Math.round((agentIndex / agents.length) * 35),
+        text: `Fetching agent details (${agentIndex}/${agents.length}): ${agent.displayName || agent.name}...`
+      });
       try {
         // 1. Fetch Agent View to check type
         let isLowCode = true;
@@ -1594,12 +1605,19 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
     }
 
     // 2. Backup Notebooks
+    setProgress({ percent: 50, text: 'Fetching notebooks...' });
     addLog(`Fetching notebooks...`);
     const response = await api.listNotebooks(sourceConfig);
     const notebooks = response.notebooks || [];
     const userNotebooks = [];
 
+    let notebookIndex = 0;
     for (const nb of notebooks) {
+      notebookIndex++;
+      setProgress({
+        percent: 55 + Math.round((notebookIndex / notebooks.length) * 40),
+        text: `Fetching notebook details (${notebookIndex}/${notebooks.length}): ${nb.title || nb.name}...`
+      });
       const notebookId = nb.name.split('/').pop()!;
       try {
         const rawNotebook = await api.getNotebook(sourceConfig, notebookId);
@@ -1628,6 +1646,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
       addLog(`[DEBUG] Owned Notebooks: ${JSON.stringify(userNotebooks.map(n => n.title), null, 2)}`);
     }
 
+    setProgress({ percent: 95, text: 'Preparing modal selection view...' });
     // 3. Combine and Open Selection Modal
     const backupData = {
       type: 'UserBackup',
@@ -1717,6 +1736,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
       accessToken: targetToken || accessToken,
     };
 
+    setProgress({ percent: 5, text: 'Fetching target resources for validation...' });
     addLog(`Fetching target resources for migration validation...`);
     const targetAgents: Agent[] = [];
     let targetPageToken: string | undefined = undefined;
@@ -1738,11 +1758,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
       addLog(`Warning: Failed to fetch target notebooks for validation: ${err.message}`);
     }
 
-    if (isDebugMode) {
-      addLog(`[DEBUG] Exchanged WIF Access Token (for terminal curls):`);
-      addLog(sourceConfig.accessToken || "Token not resolved");
-    }
-
+    setProgress({ percent: 15, text: 'Fetching source agents...' });
     addLog(`Fetching agents from ${sourceConfig.appId}...`);
     const agents: Agent[] = [];
     let pageToken: string | undefined = undefined;
@@ -1756,7 +1772,13 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
     const selectableAgents: any[] = [];
 
     addLog(`Fetching and analyzing agents via Agent View...`);
+    let agentIndex = 0;
     for (const agent of agents) {
+      agentIndex++;
+      setProgress({
+        percent: 20 + Math.round((agentIndex / agents.length) * 35),
+        text: `Analyzing source agent (${agentIndex}/${agents.length}): ${agent.displayName || agent.name}...`
+      });
       try {
         // 1. Fetch Agent View for exact type and owner details
         const rawResponse = await api.getAgentView(agent.name, sourceConfig);
@@ -1928,13 +1950,20 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
       }
     }
 
+    setProgress({ percent: 60, text: 'Fetching notebooks...' });
     addLog(`Fetching notebooks...`);
     const response = await api.listNotebooks(sourceConfig);
     const notebooks = response.notebooks || [];
     const fullBackupNotebooks: any[] = [];
     const selectableNotebooks: any[] = [];
 
+    let notebookIndex = 0;
     for (const nb of notebooks) {
+      notebookIndex++;
+      setProgress({
+        percent: 65 + Math.round((notebookIndex / notebooks.length) * 30),
+        text: `Analyzing source notebook (${notebookIndex}/${notebooks.length}): ${nb.title || nb.name}...`
+      });
       const notebookId = nb.name.split('/').pop()!;
       try {
         const rawNotebook = await api.getNotebook(sourceConfig, notebookId);
@@ -2047,7 +2076,14 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
       const targetNotebookTitles = new Set(targetNotebooks.map(n => n.title));
 
       const agentItems: SelectableItem[] = [];
-      for (const agent of (backupData.agents || [])) {
+      const backupAgentsList = backupData.agents || [];
+      let agentIndex = 0;
+      for (const agent of backupAgentsList) {
+        agentIndex++;
+        setProgress({
+          percent: 25 + Math.round((agentIndex / backupAgentsList.length) * 65),
+          text: `Analyzing collision for agent (${agentIndex}/${backupAgentsList.length}): ${agent.displayName || agent.name}...`
+        });
         const collision = await checkAgentCollision(
           agent,
           targetAgents,
@@ -2143,12 +2179,14 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
 
         // 1. Restore Agents
         if (filteredAgents.length > 0) {
+          setProgress({ percent: 10, text: `Restoring ${filteredAgents.length} agents...` });
           addLog(`Restoring ${filteredAgents.length} agents to ${targetConfig.appId}...`);
           await restoreAgentsIntoAssistant(filteredAgents, targetConfig, pendingBackupData.sourceConfig);
         }
 
         // 2. Restore Notebooks
         if (filteredNotebooks.length > 0) {
+          setProgress({ percent: 50, text: `Checking existing notebooks in target...` });
           addLog(`Restoring ${filteredNotebooks.length} notebooks to ${targetConfig.appId}...`);
           
           addLog(`Checking for existing notebooks in target...`);
@@ -2160,7 +2198,13 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             addLog(`Warning: Could not list existing notebooks in target: ${listErr.message}`);
           }
 
+          let notebookIndex = 0;
           for (const nb of filteredNotebooks) {
+            notebookIndex++;
+            setProgress({
+              percent: 55 + Math.round((notebookIndex / filteredNotebooks.length) * 40),
+              text: `Restoring notebook (${notebookIndex}/${filteredNotebooks.length}): ${nb.title || nb.name}...`
+            });
             const cleanTitle = nb.title || 'Restored Notebook';
             const targetTitle = cleanTitle.endsWith(' (Restored)') ? cleanTitle : `${cleanTitle} (Restored)`;
             
@@ -4358,6 +4402,27 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               {isLoading ? `Running: ${loadingSection?.replace(/[A-Z]/g, ' $&').trim()}` : 'Operation Logs'}
             </h2>
             {error && <div className="text-sm text-red-600 p-3 mb-3 bg-red-50 border border-red-200 rounded-lg">{error}</div>}
+            
+            {/* Progress Bar */}
+            {isLoading && progress && (
+              <div className="mb-4">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs font-semibold text-gray-600 dark:text-slate-400">
+                    {progress.text}
+                  </span>
+                  <span className="text-xs font-bold text-blue-600 dark:text-blue-400">
+                    {progress.percent}%
+                  </span>
+                </div>
+                <div className="w-full bg-gray-100 dark:bg-slate-900 rounded-full h-2 overflow-hidden border border-gray-200 dark:border-slate-700">
+                  <div 
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out" 
+                    style={{ width: `${progress.percent}%` }}
+                  ></div>
+                </div>
+              </div>
+            )}
+
             <pre className="bg-gray-50 dark:bg-slate-900 text-xs text-gray-700 dark:text-slate-300 p-4 rounded-lg h-64 overflow-y-auto font-mono border border-gray-200 dark:border-slate-700">
               {logs.join('\n')}
             </pre>
