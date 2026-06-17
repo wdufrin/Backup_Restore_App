@@ -803,7 +803,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
 
   const [isLoadingSourceApps, setIsLoadingSourceApps] = useState(false);
   const [isLoadingTargetApps, setIsLoadingTargetApps] = useState(false);
-  const [isDebugMode, setIsDebugMode] = useState(false);
+  const isDebugMode = logLevel === 'DEBUG';
   const [restoreFileContent, setRestoreFileContent] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingSection, setLoadingSection] = useState<string | null>(null);
@@ -1584,7 +1584,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             userAgents.push(agent);
           }
         } else {
-          addLog(`  - Error: Failed to backup agent ${agent.displayName || agent.name} due to view/policy fetch error: ${(e as any).message}. Skipping agent.`);
+          addLog(`  - Warning: Failed to backup agent ${agent.displayName || agent.name} due to view/policy fetch error: ${(e as any).message}. Skipping agent.`);
         }
       }
     }
@@ -1923,7 +1923,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             });
           }
         } else {
-          addLog(`  - Error: Failed to fetch Agent View for agent ${agent.displayName || agent.name}: ${e.message}. Skipping agent.`);
+          addLog(`  - Warning: Failed to fetch Agent View for agent ${agent.displayName || agent.name}: ${e.message}. Skipping agent.`);
         }
       }
     }
@@ -3570,20 +3570,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             </div>
           )}
 
-          {isAdminModeEnabled && (
-            <div className="flex items-center gap-2 mb-4">
-              <input 
-                type="checkbox" 
-                id="debugMode" 
-                checked={isDebugMode} 
-                onChange={(e) => setIsDebugMode(e.target.checked)}
-                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-              />
-              <label htmlFor="debugMode" className="text-sm text-gray-700 dark:text-white font-medium cursor-pointer">
-                Enable Verbose Debug Logging
-              </label>
-            </div>
-          )}
+
 
           {featureFlags.idpChangeEnabled ? (
             <>

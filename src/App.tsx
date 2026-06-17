@@ -44,6 +44,15 @@ function App() {
   const [accessToken, setAccessToken] = useState<string>(() => sessionStorage.getItem('agentspace-accessToken') || '');
   const [sourceToken, setSourceToken] = useState<string>(() => sessionStorage.getItem('agentspace-sourceToken') || '');
   const [targetToken, setTargetToken] = useState<string>(() => sessionStorage.getItem('agentspace-targetToken') || '');
+
+  useEffect(() => {
+    if (sourceIdp === targetIdp) {
+      setSourceToken('');
+      setTargetToken('');
+      sessionStorage.removeItem('agentspace-sourceToken');
+      sessionStorage.removeItem('agentspace-targetToken');
+    }
+  }, [sourceIdp, targetIdp]);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem('theme');
     return saved === 'dark';
