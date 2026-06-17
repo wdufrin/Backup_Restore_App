@@ -208,6 +208,7 @@ To enable browser-based login with PKCE, the application registration must be co
 You can build and deploy the container to Google Cloud Run:
 
 1.  **Automated Build via Cloud Build**:
+    Make sure to configure the `_ALLOWED_ORIGINS` and `_ALLOWED_EMAIL_DOMAIN` substitutions in your Cloud Build trigger UI (see **Security Configurations** below).
     ```bash
     gcloud builds submit --config cloudbuild.yaml
     ```
@@ -220,13 +221,37 @@ You can build and deploy the container to Google Cloud Run:
     # Push to Container Registry
     docker push gcr.io/YOUR_PROJECT_ID/backup-restore-app:latest
     
-    # Deploy to Cloud Run
+    # Deploy to Cloud Run with CORS origin security enabled
     gcloud run deploy backup-restore-app \
         --image gcr.io/YOUR_PROJECT_ID/backup-restore-app:latest \
         --platform managed \
         --port 8080 \
-        --allow-unauthenticated
+        --allow-unauthenticated \
+        --set-env-vars="ALLOWED_ORIGINS=https://your-cloud-run-url.run.app,ALLOWED_EMAIL_DOMAIN=your-org-domain.com"
     ```
+
+---
+
+## 6. Security Configurations
+
+The application includes server-side request validation (SSRF mitigation), origin validation (CORS restriction), and OAuth Token verification.
+
+### Environment Variables
+
+| Variable | Description | Default | Example |
+| :--- | :--- | :--- | :--- |
+| `ALLOWED_ORIGINS` | Comma-separated list of origins allowed to perform operations against the backend API. Must match the URL of the deployed application. | `http://localhost:5173` | `https://my-app.us-central1.run.app` |
+| `ALLOWED_EMAIL_DOMAIN` | Optional. Domain suffix to restrict access to the backup/restore APIs to users from a specific domain. | (Disabled) | `fedex.com` |
+
+### Configuring Cloud Build Triggers
+
+If deploying via a Cloud Build git-trigger, you should configure these variables using Cloud Build Substitutions:
+1. In GCP Console, go to **Cloud Build** > **Triggers**.
+2. Edit your trigger.
+3. Under **Advanced** > **Substitution variables**, add:
+   * Key: `_ALLOWED_ORIGINS` / Value: `https://<your-cloud-run-url>`
+   * Key: `_ALLOWED_EMAIL_DOMAIN` / Value: `<your-org-domain>` (optional)
+4. Save the changes.
 
 ---
 
