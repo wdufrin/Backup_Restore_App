@@ -86,6 +86,10 @@ function App() {
     };
   });
   const [isWifModalOpen, setIsWifModalOpen] = useState(false);
+  const [activeConfigTab, setActiveConfigTab] = useState<'wif' | 'google'>('wif');
+
+
+
   const tokenClient = useRef<any>(null);
 
   const handleResetWifConfig = () => {
@@ -98,6 +102,11 @@ function App() {
       authEndpoint: import.meta.env.VITE_WIF_AUTH_ENDPOINT || '',
       redirectUri: import.meta.env.VITE_WIF_REDIRECT_URI || '',
     });
+  };
+
+  const handleResetGoogleConfig = () => {
+    localStorage.removeItem('agentspace-googleClientId');
+    setGoogleClientId(import.meta.env.VITE_GOOGLE_CLIENT_ID || '');
   };
 
   const handleSetAccessToken = useCallback((token: string) => {
@@ -384,7 +393,18 @@ function App() {
                 {renderLoginButton('source')}
                 {sourceIdp !== targetIdp && renderLoginButton('target')}
                 {isAdminModeEnabled && (
-                  <button onClick={() => setIsWifModalOpen(true)} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full shadow-md transition-colors" title="WIF Configuration">
+                  <button 
+                    onClick={() => {
+                      if (enableWifIdp) {
+                        setActiveConfigTab('wif');
+                      } else if (enableGoogleIdp) {
+                        setActiveConfigTab('google');
+                      }
+                      setIsWifModalOpen(true);
+                    }} 
+                    className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full shadow-md transition-colors" 
+                    title={enableGoogleIdp && enableWifIdp ? "Authentication Settings" : enableWifIdp ? "WIF Configuration" : "Google Configuration"}
+                  >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -400,62 +420,121 @@ function App() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg max-w-md w-full flex flex-col border border-gray-200 dark:border-slate-700 p-6">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-bold text-gray-900 dark:text-white">WIF Configuration</h2>
+              <h2 className="text-lg font-bold text-gray-900 dark:text-white">
+                {enableGoogleIdp && enableWifIdp 
+                  ? "Authentication Settings" 
+                  : enableWifIdp 
+                    ? "WIF Configuration" 
+                    : "Google Configuration"}
+              </h2>
               <button onClick={() => setIsWifModalOpen(false)} className="text-gray-400 hover:text-gray-600">
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
+
+            {enableGoogleIdp && enableWifIdp && (
+              <div className="flex border-b border-gray-200 dark:border-slate-700 mb-4">
+                <button
+                  type="button"
+                  onClick={() => setActiveConfigTab('wif')}
+                  className={`flex-1 pb-2 text-sm font-semibold transition-colors duration-200 border-b-2 ${
+                    activeConfigTab === 'wif'
+                      ? 'border-blue-600 text-blue-600 dark:border-blue-500 dark:text-blue-400'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-slate-400 dark:hover:text-slate-300'
+                  }`}
+                >
+                  Workload Identity
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveConfigTab('google')}
+                  className={`flex-1 pb-2 text-sm font-semibold transition-colors duration-200 border-b-2 ${
+                    activeConfigTab === 'google'
+                      ? 'border-blue-600 text-blue-600 dark:border-blue-500 dark:text-blue-400'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-slate-400 dark:hover:text-slate-300'
+                  }`}
+                >
+                  Google Auth
+                </button>
+              </div>
+            )}
+
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">User Project</label>
-                <input type="text" value={wifConfig.userProject} onChange={(e) => setWifConfig({...wifConfig, userProject: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Pool ID</label>
-                <input type="text" value={wifConfig.poolId} onChange={(e) => setWifConfig({...wifConfig, poolId: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Provider ID</label>
-                <input type="text" value={wifConfig.providerId} onChange={(e) => setWifConfig({...wifConfig, providerId: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Client ID</label>
-                <input type="text" value={wifConfig.clientId} onChange={(e) => setWifConfig({...wifConfig, clientId: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Auth Endpoint</label>
-                <input type="text" value={wifConfig.authEndpoint} onChange={(e) => setWifConfig({...wifConfig, authEndpoint: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Redirect URI</label>
-                <input type="text" value={wifConfig.redirectUri} onChange={(e) => setWifConfig({...wifConfig, redirectUri: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
-              </div>
+              {activeConfigTab === 'wif' && enableWifIdp && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">User Project</label>
+                    <input type="text" value={wifConfig.userProject} onChange={(e) => setWifConfig({...wifConfig, userProject: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Pool ID</label>
+                    <input type="text" value={wifConfig.poolId} onChange={(e) => setWifConfig({...wifConfig, poolId: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Provider ID</label>
+                    <input type="text" value={wifConfig.providerId} onChange={(e) => setWifConfig({...wifConfig, providerId: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Client ID</label>
+                    <input type="text" value={wifConfig.clientId} onChange={(e) => setWifConfig({...wifConfig, clientId: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Auth Endpoint</label>
+                    <input type="text" value={wifConfig.authEndpoint} onChange={(e) => setWifConfig({...wifConfig, authEndpoint: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Redirect URI</label>
+                    <input type="text" value={wifConfig.redirectUri} onChange={(e) => setWifConfig({...wifConfig, redirectUri: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                  </div>
+                </>
+              )}
+              {activeConfigTab === 'google' && enableGoogleIdp && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Google Client ID</label>
+                  <input type="text" value={googleClientId} onChange={(e) => setGoogleClientId(e.target.value)} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                </div>
+              )}
             </div>
             <div className="flex justify-between mt-6">
               <div className="flex gap-2">
-                <button 
-                  onClick={exportWifConfig} 
-                  className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs font-semibold rounded-lg"
-                >
-                  Export
-                </button>
-                <label className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs font-semibold rounded-lg cursor-pointer">
-                  Import
-                  <input type="file" accept=".json" onChange={importWifConfig} className="hidden" />
-                </label>
+                {activeConfigTab === 'wif' && (
+                  <>
+                    <button 
+                      onClick={exportWifConfig} 
+                      className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs font-semibold rounded-lg"
+                    >
+                      Export
+                    </button>
+                    <label className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs font-semibold rounded-lg cursor-pointer">
+                      Import
+                      <input type="file" accept=".json" onChange={importWifConfig} className="hidden" />
+                    </label>
+                  </>
+                )}
               </div>
               <div className="flex gap-2">
                 <button 
-                  onClick={handleResetWifConfig} 
+                  onClick={() => {
+                    if (activeConfigTab === 'wif') {
+                      handleResetWifConfig();
+                    } else {
+                      handleResetGoogleConfig();
+                    }
+                  }} 
                   className="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white text-sm font-semibold rounded-lg"
                 >
                   Reset
                 </button>
                 <button 
                   onClick={() => {
-                    localStorage.setItem('agentspace-wifConfig', JSON.stringify(wifConfig));
+                    if (enableWifIdp) {
+                      localStorage.setItem('agentspace-wifConfig', JSON.stringify(wifConfig));
+                    }
+                    if (enableGoogleIdp) {
+                      localStorage.setItem('agentspace-googleClientId', googleClientId);
+                    }
                     setIsWifModalOpen(false);
                   }} 
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg"

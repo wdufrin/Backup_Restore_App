@@ -169,6 +169,12 @@ To enable browser-based login with PKCE, the application registration must be co
 
 ## 5. Setup & Installation
 
+Deploying the application involves:
+1.  **Identity Provider Registration**: Registering the application redirects and permissions in Entra ID (for WIF) and GCP OAuth (for Google Auth).
+2.  **IAM Provisioning**: Granting the `customBackupViewer` role to administrators.
+3.  **Application Hosting**: Running the Docker container or local server.
+4.  **Admin Setup**: Performing the first-time setup and configuring mapping variables.
+
 ### Option A: Local Development
 
 1.  **Clone the Repository**:
@@ -232,30 +238,7 @@ You can build and deploy the container to Google Cloud Run:
 
 ---
 
-## 6. Security Configurations
-
-The application includes server-side request validation (SSRF mitigation), origin validation (CORS restriction), and OAuth Token verification.
-
-### Environment Variables
-
-| Variable | Description | Default | Example |
-| :--- | :--- | :--- | :--- |
-| `ALLOWED_ORIGINS` | Comma-separated list of origins allowed to perform operations against the backend API. Must match the URL of the deployed application. | `http://localhost:5173` | `https://my-app.us-central1.run.app` |
-| `ALLOWED_EMAIL_DOMAIN` | Optional. Domain suffix to restrict access to the backup/restore APIs to users from a specific domain. | (Disabled) | `fedex.com` |
-
-### Configuring Cloud Build Triggers
-
-If deploying via a Cloud Build git-trigger, you should configure these variables using Cloud Build Substitutions:
-1. In GCP Console, go to **Cloud Build** > **Triggers**.
-2. Edit your trigger.
-3. Under **Advanced** > **Substitution variables**, add:
-   * Key: `_ALLOWED_ORIGINS` / Value: `https://<your-cloud-run-url>`
-   * Key: `_ALLOWED_EMAIL_DOMAIN` / Value: `<your-org-domain>` (optional)
-4. Save the changes.
-
----
-
-### Option C: GKE Deployment - WIP
+### Option C: GKE Deployment
 
 Kubernetes manifests are located in the `kubernetes/` directory.
 
@@ -278,3 +261,65 @@ Kubernetes manifests are located in the `kubernetes/` directory.
         kubectl get ingress backup-restore-ingress
         ```
         Wait until an IP is assigned to resolve the domain to the cluster.
+
+---
+
+## 6. Admin Operations & Configuration
+
+This application provides dedicated tools for administrators to configure identity providers, map environments, and download environment configuration files.
+
+### 1. Enabling Admin Mode
+To access the administrative features, you must either:
+*   Configure `VITE_ENABLE_ADMIN_MODE=true` in your `.env` or container environment variables.
+*   Or append `?admin=true` to the login screen URL (e.g., `http://localhost:5173/?admin=true`).
+
+### 2. Login Screen Settings Gear
+When Admin Mode is enabled, a settings gear button is displayed on the login screen. Clicking this button opens the **Authentication Settings** modal, allowing you to configure parameters without logging in:
+*   **Workload Identity tab** (visible when `VITE_ENABLE_WIF_IDP` is enabled):
+    *   **User Project**: The Google Cloud project hosting the workforce pool.
+    *   **Pool ID**: The WIF workforce pool ID.
+    *   **Provider ID**: The workforce pool provider ID.
+    *   **Client ID**: The client ID from Azure/Microsoft Entra.
+    *   **Auth Endpoint**: Microsoft Entra tenant authorization endpoint URL.
+    *   **Redirect URI**: The URL that users are redirected to after authenticating (must match redirect URIs in Entra ID).
+    *   *Utility actions*: You can **Export** WIF settings to a local JSON file or **Import** them to quickly bootstrap settings on another client machine.
+*   **Google Auth tab** (visible when `VITE_ENABLE_GOOGLE_IDP` is enabled):
+    *   **Google Client ID**: Configure the OAuth 2.0 Client ID for standard Google accounts.
+*   **Save & Reset**: Click **Save** to write settings to the browser's `localStorage` or **Reset** to restore default values from `.env`.
+
+### 3. Creating Environmental Mappings
+Once logged in, open the **Admin View** tab to configure mappings:
+*   **Environment Mappings**: Specify source and target projects, App Engine application IDs, and regions.
+*   **Resource Mapping Tables**: Define source-to-target mapping JSON schemas for datastores and collections:
+    *   `VITE_DATASTORE_MAPPING`: maps source Vertex search data store IDs to target data store IDs.
+    *   `VITE_COLLECTION_MAPPING`: maps source document collection IDs to target collection IDs.
+*   **Exporting Mappings**: Click **Export Env Config** to download the completed mapping configuration as an env file (`.env.exported`).
+
+### 4. Deploying Config Changes (Server Persistence)
+Because this application is client-driven and backend services like Cloud Run are stateless, configurations modified dynamically in the UI are kept in browser storage. To persist changes permanently across user sessions:
+1.  Customize variables or perform mapping configuration in the **Admin View**.
+2.  Click **Export Env Config** to download the generated settings.
+3.  Apply these settings back to your hosting provider (e.g. by setting Cloud Run environment variables or updating your code repository's `.env` / deployment manifests).
+
+---
+
+## 7. Security Configurations
+
+The application includes server-side request validation (SSRF mitigation), origin validation (CORS restriction), and OAuth Token verification.
+
+### Environment Variables
+
+| Variable | Description | Default | Example |
+| :--- | :--- | :--- | :--- |
+| `ALLOWED_ORIGINS` | Comma-separated list of origins allowed to perform operations against the backend API. Must match the URL of the deployed application. | `http://localhost:5173` | `https://my-app.us-central1.run.app` |
+| `ALLOWED_EMAIL_DOMAIN` | Optional. Domain suffix to restrict access to the backup/restore APIs to users from a specific domain. | (Disabled) | `fedex.com` |
+
+### Configuring Cloud Build Triggers
+
+If deploying via a Cloud Build git-trigger, you should configure these variables using Cloud Build Substitutions:
+1. In GCP Console, go to **Cloud Build** > **Triggers**.
+2. Edit your trigger.
+3. Under **Advanced** > **Substitution variables**, add:
+   * Key: `_ALLOWED_ORIGINS` / Value: `https://<your-cloud-run-url>`
+   * Key: `_ALLOWED_EMAIL_DOMAIN` / Value: `<your-org-domain>` (optional)
+4. Save the changes.
