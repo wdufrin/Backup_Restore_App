@@ -56,6 +56,7 @@ interface BackupPageProps {
   targetToken?: string;
   onGoogleSignIn?: () => void;
   onWifSignIn?: () => void;
+  onOktaSignIn?: () => void;
   onSignOut?: () => void;
   projectNumber: string;
   setProjectNumber: (projectNumber: string) => void;
@@ -64,12 +65,14 @@ interface BackupPageProps {
   isSettingsOpen?: boolean;
   onCloseSettings?: () => void;
   poolId?: string;
-  featureFlags: { idpChangeEnabled: boolean, enableGoogleIdp: boolean, enableWifIdp: boolean };
-  setFeatureFlags: React.Dispatch<React.SetStateAction<{ idpChangeEnabled: boolean, enableGoogleIdp: boolean, enableWifIdp: boolean }>>;
+  featureFlags: { idpChangeEnabled: boolean, enableGoogleIdp: boolean, enableWifIdp: boolean, enableOktaIdp?: boolean };
+  setFeatureFlags: React.Dispatch<React.SetStateAction<{ idpChangeEnabled: boolean, enableGoogleIdp: boolean, enableWifIdp: boolean, enableOktaIdp?: boolean }>>;
   googleClientId: string;
   setGoogleClientId: (id: string) => void;
   wifConfigState: any;
   setWifConfigState: React.Dispatch<React.SetStateAction<any>>;
+  oktaConfigState: any;
+  setOktaConfigState: React.Dispatch<React.SetStateAction<any>>;
   sourceIdp: string;
   setSourceIdp: (idp: string) => void;
   targetIdp: string;
@@ -355,6 +358,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
   targetToken, 
   onGoogleSignIn, 
   onWifSignIn, 
+  onOktaSignIn,
   onSignOut, 
   projectNumber, 
   setProjectNumber, 
@@ -369,6 +373,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
   setGoogleClientId,
   wifConfigState,
   setWifConfigState,
+  oktaConfigState,
+  setOktaConfigState,
   sourceIdp,
   setSourceIdp,
   targetIdp,
@@ -578,6 +584,15 @@ const BackupPage: React.FC<BackupPageProps> = ({
     content += `VITE_WIF_CLIENT_ID=${wifConfigState.clientId}\n`;
     content += `VITE_WIF_AUTH_ENDPOINT=${wifConfigState.authEndpoint}\n`;
     content += `VITE_WIF_REDIRECT_URI=${wifConfigState.redirectUri}\n\n`;
+
+    content += `# --- Workforce Identity Federation (WIF) / Okta Config ---\n`;
+    content += `VITE_OKTA_USER_PROJECT=${oktaConfigState.userProject}\n`;
+    content += `VITE_OKTA_POOL_ID=${oktaConfigState.poolId}\n`;
+    content += `VITE_OKTA_PROVIDER_ID=${oktaConfigState.providerId}\n`;
+    content += `VITE_OKTA_CLIENT_ID=${oktaConfigState.clientId}\n`;
+    content += `VITE_OKTA_CLIENT_SECRET=${oktaConfigState.clientSecret || ''}\n`;
+    content += `VITE_OKTA_AUTH_ENDPOINT=${oktaConfigState.authEndpoint}\n`;
+    content += `VITE_OKTA_REDIRECT_URI=${oktaConfigState.redirectUri}\n\n`;
 
     content += `# --- Migration Settings ---\n`;
     content += `VITE_MIGRATE_AGENTS=${shouldMigrateAgents}\n`;
@@ -1693,12 +1708,14 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
       if (!sourceToken) {
         addLog(`Source token missing. Please log into ${sourceIdp}...`);
         if (sourceIdp === 'Google') onGoogleSignIn?.();
+        else if (sourceIdp === 'Okta') onOktaSignIn?.();
         else onWifSignIn?.();
         return;
       }
       if (!targetToken) {
         addLog(`Target token missing. Please log into ${targetIdp}...`);
         if (targetIdp === 'Google') onGoogleSignIn?.();
+        else if (targetIdp === 'Okta') onOktaSignIn?.();
         else onWifSignIn?.();
         return;
       }
@@ -3943,6 +3960,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                   >
                     <option value="Google">Google</option>
                     <option value="WiF">WiF</option>
+                    <option value="Okta">Okta</option>
                   </select>
                 </div>
                 <div>
@@ -4052,6 +4070,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                   >
                     <option value="Google">Google</option>
                     <option value="WiF">WiF</option>
+                    <option value="Okta">Okta</option>
                   </select>
                 </div>
                 <div>
@@ -4159,6 +4178,18 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                     Enable WiF IDP
                   </label>
                 </div>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="enableOktaIdp" 
+                    checked={featureFlags.enableOktaIdp} 
+                    onChange={(e) => setFeatureFlags({...featureFlags, enableOktaIdp: e.target.checked})}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <label htmlFor="enableOktaIdp" className="text-xs text-gray-700 dark:text-white font-medium cursor-pointer">
+                    Enable Okta IDP
+                  </label>
+                </div>
               </div>
             </div>
 
@@ -4206,6 +4237,43 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                   <div className="col-span-2">
                     <label className="block text-xs text-gray-500 dark:text-white mb-1">Redirect URI</label>
                     <input type="text" value={wifConfigState.redirectUri} onChange={(e) => setWifConfigState({...wifConfigState, redirectUri: e.target.value})} className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Okta Configuration */}
+            {featureFlags.enableOktaIdp && (
+              <div className="bg-gray-50 dark:bg-slate-700 p-4 rounded-lg border border-gray-200 dark:border-slate-600">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-3">Okta Configuration</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-gray-500 dark:text-white mb-1">User Project</label>
+                    <input type="text" value={oktaConfigState.userProject} onChange={(e) => setOktaConfigState({...oktaConfigState, userProject: e.target.value})} className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 dark:text-white mb-1">Pool ID</label>
+                    <input type="text" value={oktaConfigState.poolId} onChange={(e) => setOktaConfigState({...oktaConfigState, poolId: e.target.value})} className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 dark:text-white mb-1">Provider ID</label>
+                    <input type="text" value={oktaConfigState.providerId} onChange={(e) => setOktaConfigState({...oktaConfigState, providerId: e.target.value})} className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 dark:text-white mb-1">Client ID</label>
+                    <input type="text" value={oktaConfigState.clientId} onChange={(e) => setOktaConfigState({...oktaConfigState, clientId: e.target.value})} className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 dark:text-white mb-1">Client Secret</label>
+                    <input type="password" placeholder="••••••••" value={oktaConfigState.clientSecret || ''} onChange={(e) => setOktaConfigState({...oktaConfigState, clientSecret: e.target.value})} className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-xs text-gray-500 dark:text-white mb-1">Auth Endpoint</label>
+                    <input type="text" value={oktaConfigState.authEndpoint} onChange={(e) => setOktaConfigState({...oktaConfigState, authEndpoint: e.target.value})} className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-xs text-gray-500 dark:text-white mb-1">Redirect URI</label>
+                    <input type="text" value={oktaConfigState.redirectUri} onChange={(e) => setOktaConfigState({...oktaConfigState, redirectUri: e.target.value})} className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" />
                   </div>
                 </div>
               </div>

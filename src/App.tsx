@@ -29,7 +29,8 @@ function App() {
     return saved ? JSON.parse(saved) : {
       idpChangeEnabled: import.meta.env.VITE_IDP_CHANGE_ENABLED === 'true',
       enableGoogleIdp: import.meta.env.VITE_ENABLE_GOOGLE_IDP !== 'false',
-      enableWifIdp: import.meta.env.VITE_ENABLE_WIF_IDP !== 'false'
+      enableWifIdp: import.meta.env.VITE_ENABLE_WIF_IDP !== 'false',
+      enableOktaIdp: import.meta.env.VITE_ENABLE_OKTA_IDP === 'true'
     };
   });
 
@@ -40,6 +41,7 @@ function App() {
   const isIdpChangeEnabled = featureFlags.idpChangeEnabled;
   const enableGoogleIdp = featureFlags.enableGoogleIdp;
   const enableWifIdp = featureFlags.enableWifIdp;
+  const enableOktaIdp = featureFlags.enableOktaIdp;
 
   const [accessToken, setAccessToken] = useState<string>(() => sessionStorage.getItem('agentspace-accessToken') || '');
   const [sourceToken, setSourceToken] = useState<string>(() => sessionStorage.getItem('agentspace-sourceToken') || '');
@@ -85,13 +87,29 @@ function App() {
       redirectUri: import.meta.env.VITE_WIF_REDIRECT_URI || '',
     };
   });
+  const [oktaConfig, setOktaConfig] = useState(() => {
+    const saved = localStorage.getItem('agentspace-oktaConfig');
+    return saved ? JSON.parse(saved) : {
+      userProject: import.meta.env.VITE_OKTA_USER_PROJECT || '',
+      poolId: import.meta.env.VITE_OKTA_POOL_ID || '',
+      providerId: import.meta.env.VITE_OKTA_PROVIDER_ID || '',
+      clientId: import.meta.env.VITE_OKTA_CLIENT_ID || '',
+      clientSecret: import.meta.env.VITE_OKTA_CLIENT_SECRET || '',
+      authEndpoint: import.meta.env.VITE_OKTA_AUTH_ENDPOINT || '',
+      redirectUri: import.meta.env.VITE_OKTA_REDIRECT_URI || '',
+    };
+  });
   const [isWifModalOpen, setIsWifModalOpen] = useState(false);
-  const [activeConfigTab, setActiveConfigTab] = useState<'wif' | 'google'>('wif');
-
-
-
+  const [activeConfigTab, setActiveConfigTab] = useState<'wif' | 'google' | 'okta'>(() => {
+    if (import.meta.env.VITE_ENABLE_WIF_IDP !== 'false') return 'wif';
+    if (import.meta.env.VITE_ENABLE_OKTA_IDP === 'true') return 'okta';
+    return 'google';
+  });
+ 
+ 
+ 
   const tokenClient = useRef<any>(null);
-
+ 
   const handleResetWifConfig = () => {
     localStorage.removeItem('agentspace-wifConfig');
     setWifConfig({
@@ -101,6 +119,19 @@ function App() {
       clientId: import.meta.env.VITE_WIF_CLIENT_ID || '',
       authEndpoint: import.meta.env.VITE_WIF_AUTH_ENDPOINT || '',
       redirectUri: import.meta.env.VITE_WIF_REDIRECT_URI || '',
+    });
+  };
+ 
+  const handleResetOktaConfig = () => {
+    localStorage.removeItem('agentspace-oktaConfig');
+    setOktaConfig({
+      userProject: import.meta.env.VITE_OKTA_USER_PROJECT || '',
+      poolId: import.meta.env.VITE_OKTA_POOL_ID || '',
+      providerId: import.meta.env.VITE_OKTA_PROVIDER_ID || '',
+      clientId: import.meta.env.VITE_OKTA_CLIENT_ID || '',
+      clientSecret: import.meta.env.VITE_OKTA_CLIENT_SECRET || '',
+      authEndpoint: import.meta.env.VITE_OKTA_AUTH_ENDPOINT || '',
+      redirectUri: import.meta.env.VITE_OKTA_REDIRECT_URI || '',
     });
   };
 
@@ -183,7 +214,7 @@ function App() {
     }
   };
 
-  const handleWifSignIn = async () => {
+  const handleWifSignIn = async (roleOverride?: 'source' | 'target') => {
     try {
       const authorizationEndpoint = wifConfig.authEndpoint;
       const clientId = wifConfig.clientId;
@@ -205,15 +236,15 @@ function App() {
       console.log("STS Token Exchange successful!");
       
       const token = stsResponse.access_token;
-      if (sourceIdp !== targetIdp) {
-        if (sourceIdp === 'WiF') {
-          setSourceToken(token);
-          sessionStorage.setItem('agentspace-sourceToken', token);
-        }
-        if (targetIdp === 'WiF') {
-          setTargetToken(token);
-          sessionStorage.setItem('agentspace-targetToken', token);
-        }
+      const activeRole = roleOverride || (sourceIdp !== targetIdp ? (sourceIdp === 'WiF' ? 'source' : 'target') : null);
+
+      if (activeRole === 'source') {
+        setSourceToken(token);
+        sessionStorage.setItem('agentspace-sourceToken', token);
+        handleSetAccessToken(token);
+      } else if (activeRole === 'target') {
+        setTargetToken(token);
+        sessionStorage.setItem('agentspace-targetToken', token);
         handleSetAccessToken(token);
       } else {
         handleSetAccessToken(token);
@@ -230,6 +261,64 @@ function App() {
       
     } catch (err: any) {
       console.error("WiF Sign-in failed", err);
+      alert(`Sign-in failed: ${err.message}`);
+    }
+  };
+
+  const handleOktaSignIn = async (roleOverride?: 'source' | 'target') => {
+    try {
+      const authorizationEndpoint = oktaConfig.authEndpoint;
+      const clientId = oktaConfig.clientId;
+      const redirectUri = oktaConfig.redirectUri;
+
+      console.log("Starting Okta sign in (backend exchange)...");
+      const { idToken, email, sub } = await api.signInWithOidcPopup(
+        authorizationEndpoint, 
+        clientId, 
+        redirectUri, 
+        undefined, 
+        true, 
+        oktaConfig.clientSecret
+      );
+      console.log("Received ID Token from Okta, exchanging for STS token...");
+
+      const wifConfigForExchange = {
+        userProject: oktaConfig.userProject,
+        poolId: oktaConfig.poolId,
+        providerId: oktaConfig.providerId,
+        subjectToken: idToken,
+        subjectTokenType: 'urn:ietf:params:oauth:token-type:id_token',
+      };
+
+      const stsResponse = await api.exchangeStsToken(wifConfigForExchange);
+      console.log("STS Token Exchange successful!");
+      
+      const token = stsResponse.access_token;
+      const activeRole = roleOverride || (sourceIdp !== targetIdp ? (sourceIdp === 'Okta' ? 'source' : 'target') : null);
+
+      if (activeRole === 'source') {
+        setSourceToken(token);
+        sessionStorage.setItem('agentspace-sourceToken', token);
+        handleSetAccessToken(token);
+      } else if (activeRole === 'target') {
+        setTargetToken(token);
+        sessionStorage.setItem('agentspace-targetToken', token);
+        handleSetAccessToken(token);
+      } else {
+        handleSetAccessToken(token);
+      }
+      
+      const profile = {
+        name: email?.split('@')[0] || 'Okta User',
+        email: email || '',
+        picture: '',
+        sub: sub || ''
+      };
+      setUserProfile(profile);
+      sessionStorage.setItem('agentspace-userProfile', JSON.stringify(profile));
+      
+    } catch (err: any) {
+      console.error("Okta Sign-in failed", err);
       alert(`Sign-in failed: ${err.message}`);
     }
   };
@@ -276,6 +365,37 @@ function App() {
     reader.readAsText(file);
   };
 
+  const exportOktaConfig = () => {
+    const jsonStr = JSON.stringify(oktaConfig, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `okta_config__${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const importOktaConfig = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const json = JSON.parse(e.target?.result as string);
+        setOktaConfig(json);
+        localStorage.setItem('agentspace-oktaConfig', JSON.stringify(json));
+        alert(`Okta configuration imported successfully from ${file.name}`);
+      } catch (err: any) {
+        alert(`Error importing Okta configuration: ${err.message}`);
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const renderLoginButton = (role: 'source' | 'target') => {
     const idp = role === 'source' ? sourceIdp : targetIdp;
     const isIdpChangeEnabled = sourceIdp !== targetIdp;
@@ -283,7 +403,7 @@ function App() {
     if (idp === 'Google' && enableGoogleIdp) {
       return (
         <button 
-          key="google"
+          key={`google-${role}`}
           onClick={handleGoogleSignIn} 
           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
         >
@@ -292,16 +412,91 @@ function App() {
       );
     }
     
-    if (idp === 'WiF' && enableWifIdp) {
-      return (
-        <button 
-          key="wif"
-          onClick={handleWifSignIn} 
-          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
-        >
-          {isIdpChangeEnabled ? `Sign In to ${role === 'source' ? 'Source' : 'Target'} (WiF)` : 'Sign In with WiF'}
-        </button>
-      );
+    // Check if the current IDP selection is WIF-based (either 'WiF' or 'Okta')
+    const isWifRelated = idp === 'WiF' || idp === 'Okta';
+    
+    if (isWifRelated) {
+      const isWifActive = enableWifIdp;
+      const isOktaActive = enableOktaIdp;
+      
+      if (isWifActive && isOktaActive) {
+        return (
+          <div key={`wif-group-${role}`} className="flex gap-2">
+            <button 
+              onClick={async () => {
+                if (role === 'source') {
+                  setSourceIdp('WiF');
+                  localStorage.setItem('agentspace-sourceIdp', 'WiF');
+                } else {
+                  setTargetIdp('WiF');
+                  localStorage.setItem('agentspace-targetIdp', 'WiF');
+                }
+                await handleWifSignIn(role);
+              }}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
+            >
+              {isIdpChangeEnabled ? `Sign In to ${role === 'source' ? 'Source' : 'Target'} (EntraID)` : 'Sign In with EntraID'}
+            </button>
+            <button 
+              onClick={async () => {
+                if (role === 'source') {
+                  setSourceIdp('Okta');
+                  localStorage.setItem('agentspace-sourceIdp', 'Okta');
+                } else {
+                  setTargetIdp('Okta');
+                  localStorage.setItem('agentspace-targetIdp', 'Okta');
+                }
+                await handleOktaSignIn(role);
+              }}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
+            >
+              {isIdpChangeEnabled ? `Sign In to ${role === 'source' ? 'Source' : 'Target'} (OKTA WIF)` : 'Sign In with OKTA WIF'}
+            </button>
+          </div>
+        );
+      }
+      
+      if (isWifActive && !isOktaActive) {
+        return (
+          <button 
+            key={`wif-${role}`}
+            onClick={async () => {
+              if (role === 'source') {
+                setSourceIdp('WiF');
+                localStorage.setItem('agentspace-sourceIdp', 'WiF');
+              } else {
+                setTargetIdp('WiF');
+                localStorage.setItem('agentspace-targetIdp', 'WiF');
+              }
+              await handleWifSignIn(role);
+            }} 
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
+          >
+            {isIdpChangeEnabled ? `Sign In to ${role === 'source' ? 'Source' : 'Target'} (WiF)` : 'Sign In with WiF'}
+          </button>
+        );
+      }
+      
+      if (!isWifActive && isOktaActive) {
+        return (
+          <button 
+            key={`okta-${role}`}
+            onClick={async () => {
+              if (role === 'source') {
+                setSourceIdp('Okta');
+                localStorage.setItem('agentspace-sourceIdp', 'Okta');
+              } else {
+                setTargetIdp('Okta');
+                localStorage.setItem('agentspace-targetIdp', 'Okta');
+              }
+              await handleOktaSignIn(role);
+            }} 
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
+          >
+            {isIdpChangeEnabled ? `Sign In to ${role === 'source' ? 'Source' : 'Target'} (WiF)` : 'Sign In with WiF'}
+          </button>
+        );
+      }
     }
     return null;
   };
@@ -364,6 +559,7 @@ function App() {
               targetToken={targetToken}
               onGoogleSignIn={handleGoogleSignIn}
               onWifSignIn={handleWifSignIn} 
+              onOktaSignIn={handleOktaSignIn} 
               onSignOut={handleSignOut}
               projectNumber={projectNumber} 
               setProjectNumber={(num) => {
@@ -374,13 +570,15 @@ function App() {
               userSub={userProfile?.sub || ''}
               isSettingsOpen={isSettingsOpen}
               onCloseSettings={() => setIsSettingsOpen(false)}
-              poolId={wifConfig.poolId}
+              poolId={sourceIdp === 'Okta' ? oktaConfig.poolId : wifConfig.poolId}
               featureFlags={featureFlags}
               setFeatureFlags={setFeatureFlags}
               googleClientId={googleClientId}
               setGoogleClientId={setGoogleClientId}
               wifConfigState={wifConfig}
               setWifConfigState={setWifConfig}
+              oktaConfigState={oktaConfig}
+              setOktaConfigState={setOktaConfig}
               sourceIdp={sourceIdp}
               setSourceIdp={setSourceIdp}
               targetIdp={targetIdp}
@@ -397,6 +595,8 @@ function App() {
                     onClick={() => {
                       if (enableWifIdp) {
                         setActiveConfigTab('wif');
+                      } else if (enableOktaIdp) {
+                        setActiveConfigTab('okta');
                       } else if (enableGoogleIdp) {
                         setActiveConfigTab('google');
                       }
@@ -421,11 +621,7 @@ function App() {
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg max-w-md w-full flex flex-col border border-gray-200 dark:border-slate-700 p-6">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-lg font-bold text-gray-900 dark:text-white">
-                {enableGoogleIdp && enableWifIdp 
-                  ? "Authentication Settings" 
-                  : enableWifIdp 
-                    ? "WIF Configuration" 
-                    : "Google Configuration"}
+                Authentication Settings
               </h2>
               <button onClick={() => setIsWifModalOpen(false)} className="text-gray-400 hover:text-gray-600">
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -434,67 +630,183 @@ function App() {
               </button>
             </div>
 
-            {enableGoogleIdp && enableWifIdp && (
-              <div className="flex border-b border-gray-200 dark:border-slate-700 mb-4">
-                <button
-                  type="button"
-                  onClick={() => setActiveConfigTab('wif')}
-                  className={`flex-1 pb-2 text-sm font-semibold transition-colors duration-200 border-b-2 ${
-                    activeConfigTab === 'wif'
-                      ? 'border-blue-600 text-blue-600 dark:border-blue-500 dark:text-blue-400'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-slate-400 dark:hover:text-slate-300'
-                  }`}
+            <div className="grid grid-cols-2 gap-4 mb-4 pb-4 border-b border-gray-200 dark:border-slate-700">
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 dark:text-slate-400 mb-1">Source IDP</label>
+                <select 
+                  value={sourceIdp} 
+                  onChange={(e) => setSourceIdp(e.target.value)}
+                  className="bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white"
                 >
-                  Workload Identity
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveConfigTab('google')}
-                  className={`flex-1 pb-2 text-sm font-semibold transition-colors duration-200 border-b-2 ${
-                    activeConfigTab === 'google'
-                      ? 'border-blue-600 text-blue-600 dark:border-blue-500 dark:text-blue-400'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-slate-400 dark:hover:text-slate-300'
-                  }`}
-                >
-                  Google Auth
-                </button>
+                  {featureFlags.enableGoogleIdp && <option value="Google">Google</option>}
+                  {featureFlags.enableWifIdp && <option value="WiF">WiF</option>}
+                  {featureFlags.enableOktaIdp && <option value="Okta">Okta</option>}
+                </select>
               </div>
-            )}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 dark:text-slate-400 mb-1">Target IDP</label>
+                <select 
+                  value={targetIdp} 
+                  onChange={(e) => setTargetIdp(e.target.value)}
+                  className="bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white"
+                >
+                  {featureFlags.enableGoogleIdp && <option value="Google">Google</option>}
+                  {featureFlags.enableWifIdp && <option value="WiF">WiF</option>}
+                  {featureFlags.enableOktaIdp && <option value="Okta">Okta</option>}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex border-b border-gray-200 dark:border-slate-700 mb-4">
+              <button
+                type="button"
+                onClick={() => setActiveConfigTab('wif')}
+                className={`flex-1 pb-2 text-sm font-semibold transition-colors duration-200 border-b-2 ${
+                  activeConfigTab === 'wif'
+                    ? 'border-blue-600 text-blue-600 dark:border-blue-500 dark:text-blue-400'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-slate-400 dark:hover:text-slate-300'
+                }`}
+              >
+                Workload Identity
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveConfigTab('okta')}
+                className={`flex-1 pb-2 text-sm font-semibold transition-colors duration-200 border-b-2 ${
+                  activeConfigTab === 'okta'
+                    ? 'border-blue-600 text-blue-600 dark:border-blue-500 dark:text-blue-400'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-slate-400 dark:hover:text-slate-300'
+                }`}
+              >
+                Okta
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveConfigTab('google')}
+                className={`flex-1 pb-2 text-sm font-semibold transition-colors duration-200 border-b-2 ${
+                  activeConfigTab === 'google'
+                    ? 'border-blue-600 text-blue-600 dark:border-blue-500 dark:text-blue-400'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-slate-400 dark:hover:text-slate-300'
+                }`}
+              >
+                Google Auth
+              </button>
+            </div>
 
             <div className="space-y-4">
-              {activeConfigTab === 'wif' && enableWifIdp && (
+              {activeConfigTab === 'wif' && (
                 <>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">User Project</label>
-                    <input type="text" value={wifConfig.userProject} onChange={(e) => setWifConfig({...wifConfig, userProject: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                  <div className="flex items-center gap-2 mb-2">
+                    <input 
+                      type="checkbox" 
+                      id="modalEnableWifIdp" 
+                      checked={featureFlags.enableWifIdp} 
+                      onChange={(e) => setFeatureFlags({...featureFlags, enableWifIdp: e.target.checked})}
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="modalEnableWifIdp" className="text-xs font-semibold text-gray-700 dark:text-slate-300 cursor-pointer">
+                      Enable Workload Identity IDP
+                    </label>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Pool ID</label>
-                    <input type="text" value={wifConfig.poolId} onChange={(e) => setWifConfig({...wifConfig, poolId: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Provider ID</label>
-                    <input type="text" value={wifConfig.providerId} onChange={(e) => setWifConfig({...wifConfig, providerId: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Client ID</label>
-                    <input type="text" value={wifConfig.clientId} onChange={(e) => setWifConfig({...wifConfig, clientId: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Auth Endpoint</label>
-                    <input type="text" value={wifConfig.authEndpoint} onChange={(e) => setWifConfig({...wifConfig, authEndpoint: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Redirect URI</label>
-                    <input type="text" value={wifConfig.redirectUri} onChange={(e) => setWifConfig({...wifConfig, redirectUri: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
-                  </div>
+                  {featureFlags.enableWifIdp && (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">User Project</label>
+                        <input type="text" value={wifConfig.userProject} onChange={(e) => setWifConfig({...wifConfig, userProject: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Pool ID</label>
+                        <input type="text" value={wifConfig.poolId} onChange={(e) => setWifConfig({...wifConfig, poolId: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Provider ID</label>
+                        <input type="text" value={wifConfig.providerId} onChange={(e) => setWifConfig({...wifConfig, providerId: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Client ID</label>
+                        <input type="text" value={wifConfig.clientId} onChange={(e) => setWifConfig({...wifConfig, clientId: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Auth Endpoint</label>
+                        <input type="text" value={wifConfig.authEndpoint} onChange={(e) => setWifConfig({...wifConfig, authEndpoint: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Redirect URI</label>
+                        <input type="text" value={wifConfig.redirectUri} onChange={(e) => setWifConfig({...wifConfig, redirectUri: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
-              {activeConfigTab === 'google' && enableGoogleIdp && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Google Client ID</label>
-                  <input type="text" value={googleClientId} onChange={(e) => setGoogleClientId(e.target.value)} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
-                </div>
+              {activeConfigTab === 'okta' && (
+                <>
+                  <div className="flex items-center gap-2 mb-2">
+                    <input 
+                      type="checkbox" 
+                      id="modalEnableOktaIdp" 
+                      checked={featureFlags.enableOktaIdp} 
+                      onChange={(e) => setFeatureFlags({...featureFlags, enableOktaIdp: e.target.checked})}
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="modalEnableOktaIdp" className="text-xs font-semibold text-gray-700 dark:text-slate-300 cursor-pointer">
+                      Enable Okta IDP
+                    </label>
+                  </div>
+                  {featureFlags.enableOktaIdp && (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">User Project</label>
+                        <input type="text" value={oktaConfig.userProject} onChange={(e) => setOktaConfig({...oktaConfig, userProject: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Pool ID</label>
+                        <input type="text" value={oktaConfig.poolId} onChange={(e) => setOktaConfig({...oktaConfig, poolId: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Provider ID</label>
+                        <input type="text" value={oktaConfig.providerId} onChange={(e) => setOktaConfig({...oktaConfig, providerId: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Client ID</label>
+                        <input type="text" value={oktaConfig.clientId} onChange={(e) => setOktaConfig({...oktaConfig, clientId: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Client Secret</label>
+                        <input type="password" placeholder="••••••••" value={oktaConfig.clientSecret || ''} onChange={(e) => setOktaConfig({...oktaConfig, clientSecret: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Auth Endpoint</label>
+                        <input type="text" value={oktaConfig.authEndpoint} onChange={(e) => setOktaConfig({...oktaConfig, authEndpoint: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Redirect URI</label>
+                        <input type="text" value={oktaConfig.redirectUri} onChange={(e) => setOktaConfig({...oktaConfig, redirectUri: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+              {activeConfigTab === 'google' && (
+                <>
+                  <div className="flex items-center gap-2 mb-2">
+                    <input 
+                      type="checkbox" 
+                      id="modalEnableGoogleIdp" 
+                      checked={featureFlags.enableGoogleIdp} 
+                      onChange={(e) => setFeatureFlags({...featureFlags, enableGoogleIdp: e.target.checked})}
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="modalEnableGoogleIdp" className="text-xs font-semibold text-gray-700 dark:text-slate-300 cursor-pointer">
+                      Enable Google IDP
+                    </label>
+                  </div>
+                  {featureFlags.enableGoogleIdp && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Google Client ID</label>
+                      <input type="text" value={googleClientId} onChange={(e) => setGoogleClientId(e.target.value)} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                    </div>
+                  )}
+                </>
               )}
             </div>
             <div className="flex justify-between mt-6">
@@ -513,12 +825,28 @@ function App() {
                     </label>
                   </>
                 )}
+                {activeConfigTab === 'okta' && (
+                  <>
+                    <button 
+                      onClick={exportOktaConfig} 
+                      className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs font-semibold rounded-lg"
+                    >
+                      Export
+                    </button>
+                    <label className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs font-semibold rounded-lg cursor-pointer">
+                      Import
+                      <input type="file" accept=".json" onChange={importOktaConfig} className="hidden" />
+                    </label>
+                  </>
+                )}
               </div>
               <div className="flex gap-2">
                 <button 
                   onClick={() => {
                     if (activeConfigTab === 'wif') {
                       handleResetWifConfig();
+                    } else if (activeConfigTab === 'okta') {
+                      handleResetOktaConfig();
                     } else {
                       handleResetGoogleConfig();
                     }
@@ -529,10 +857,35 @@ function App() {
                 </button>
                 <button 
                   onClick={() => {
-                    if (enableWifIdp) {
+                    localStorage.setItem('agentspace-featureFlags', JSON.stringify(featureFlags));
+                    
+                    let finalSource = sourceIdp;
+                    let finalTarget = targetIdp;
+                    
+                    const enabledIdps = [];
+                    if (featureFlags.enableGoogleIdp) enabledIdps.push('Google');
+                    if (featureFlags.enableWifIdp) enabledIdps.push('WiF');
+                    if (featureFlags.enableOktaIdp) enabledIdps.push('Okta');
+                    
+                    if (!enabledIdps.includes(finalSource)) {
+                      finalSource = enabledIdps[0] || 'Google';
+                      setSourceIdp(finalSource);
+                    }
+                    if (!enabledIdps.includes(finalTarget)) {
+                      finalTarget = enabledIdps[0] || 'Google';
+                      setTargetIdp(finalTarget);
+                    }
+                    
+                    localStorage.setItem('agentspace-sourceIdp', finalSource);
+                    localStorage.setItem('agentspace-targetIdp', finalTarget);
+
+                    if (featureFlags.enableWifIdp) {
                       localStorage.setItem('agentspace-wifConfig', JSON.stringify(wifConfig));
                     }
-                    if (enableGoogleIdp) {
+                    if (featureFlags.enableOktaIdp) {
+                      localStorage.setItem('agentspace-oktaConfig', JSON.stringify(oktaConfig));
+                    }
+                    if (featureFlags.enableGoogleIdp) {
                       localStorage.setItem('agentspace-googleClientId', googleClientId);
                     }
                     setIsWifModalOpen(false);

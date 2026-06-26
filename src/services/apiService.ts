@@ -814,6 +814,8 @@ export const signInWithOidcPopup = async (
     clientId: string,
     redirectUri: string,
     scope: string = 'openid profile email',
+    useBackendExchange: boolean = false,
+    clientSecret?: string,
 ): Promise<{ idToken: string; email?: string; sub?: string }> => {
     const codeVerifier = generateCodeVerifier();
     const codeChallenge = await generateCodeChallenge(codeVerifier);
@@ -883,33 +885,57 @@ export const signInWithOidcPopup = async (
 
                     // Dynamically derive the token endpoint by replacing '/authorize' with '/token'
                     const tokenEndpoint = authorizationEndpoint
-                        .replace(/\/authorize$/, '/token')
-                        .replace(/\/authorization\.oauth2$/, '/token.oauth2');
+                         .replace(/\/authorize$/, '/token')
+                         .replace(/\/authorization\.oauth2$/, '/token.oauth2');
 
-                    console.log("[DEBUG] Exchanging authorization code at token endpoint:", tokenEndpoint);
+                    console.log("[DEBUG] Exchanging authorization code. Backend exchange?", useBackendExchange);
 
-                    // Exchange Authorization Code + Code Verifier for the ID Token
-                    const tokenExchangeBody = new URLSearchParams({
-                        grant_type: 'authorization_code',
-                        client_id: clientId,
-                        redirect_uri: redirectUri,
-                        code,
-                        code_verifier: codeVerifier,
-                    });
+                    let tokenData: any;
 
-                    const tokenResponse = await fetch(tokenEndpoint, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: tokenExchangeBody.toString(),
-                    });
+                    if (useBackendExchange) {
+                        const tokenResponse = await fetch('/api/okta/token', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                code,
+                                code_verifier: codeVerifier,
+                                redirect_uri: redirectUri,
+                                token_endpoint: tokenEndpoint,
+                                client_id: clientId,
+                                client_secret: clientSecret,
+                            }),
+                        });
 
-                    if (!tokenResponse.ok) {
-                        const errText = await tokenResponse.text();
-                        reject(new Error(`Failed to exchange authorization code: ${errText || tokenResponse.statusText}`));
-                        return;
+                        if (!tokenResponse.ok) {
+                            const errText = await tokenResponse.text();
+                            reject(new Error(`Failed to exchange authorization code: ${errText || tokenResponse.statusText}`));
+                            return;
+                        }
+                        tokenData = await tokenResponse.json();
+                    } else {
+                        // Exchange Authorization Code + Code Verifier for the ID Token
+                        const tokenExchangeBody = new URLSearchParams({
+                            grant_type: 'authorization_code',
+                            client_id: clientId,
+                            redirect_uri: redirectUri,
+                            code,
+                            code_verifier: codeVerifier,
+                        });
+
+                        const tokenResponse = await fetch(tokenEndpoint, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                            body: tokenExchangeBody.toString(),
+                        });
+
+                        if (!tokenResponse.ok) {
+                            const errText = await tokenResponse.text();
+                            reject(new Error(`Failed to exchange authorization code: ${errText || tokenResponse.statusText}`));
+                            return;
+                        }
+                        tokenData = await tokenResponse.json();
                     }
 
-                    const tokenData = await tokenResponse.json();
                     const idToken = tokenData.id_token;
 
                     if (!idToken) {

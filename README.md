@@ -323,3 +323,35 @@ If deploying via a Cloud Build git-trigger, you should configure these variables
    * Key: `_ALLOWED_ORIGINS` / Value: `https://<your-cloud-run-url>`
    * Key: `_ALLOWED_EMAIL_DOMAIN` / Value: `<your-org-domain>` (optional)
 4. Save the changes.
+
+---
+
+### Managing Secrets with Secret Manager (Production Setup)
+
+For secure corporate deployments, the **Okta Client Secret** must not be exposed as plain text in configuration files or triggers. Instead, provision it inside **GCP Secret Manager** and mount it directly to Cloud Run at runtime:
+
+1. **Create the Secret**:
+   Create a secret resource in GCP Secret Manager:
+   ```bash
+   gcloud secrets create okta-client-secret --replication-policy="automatic"
+   ```
+
+2. **Add the Secret Value**:
+   Upload your Okta Client Secret as version `1`:
+   ```bash
+   echo -n "YOUR_OKTA_CLIENT_SECRET" | gcloud secrets versions add okta-client-secret --data-file=-
+   ```
+
+3. **Grant Secret Accessor IAM Role**:
+   Authorize your Cloud Run service account (e.g. `PROJECT_NUMBER-compute@developer.gserviceaccount.com`) to read this secret:
+   ```bash
+   gcloud secrets add-iam-policy-binding okta-client-secret \
+       --member="serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
+       --role="roles/secretmanager.secretAccessor"
+   ```
+
+4. **Bind the Secret to Cloud Run**:
+   In your `cloudbuild.yaml` deployment step or during manual `gcloud run deploy`, append the `--update-secrets` flag to mount the secret as an environment variable:
+   ```bash
+   --update-secrets=OKTA_CLIENT_SECRET=okta-client-secret:latest
+   ```

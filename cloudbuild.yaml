@@ -28,6 +28,7 @@ steps:
       - '--image=gcr.io/$PROJECT_ID/backup-restore-app:$COMMIT_SHA'
       - '--region=us-central1'
       - '--set-env-vars=ALLOWED_ORIGINS=$_ALLOWED_ORIGINS,ALLOWED_EMAIL_DOMAIN=$_ALLOWED_EMAIL_DOMAIN'
+      - '--update-secrets=OKTA_CLIENT_SECRET=okta-client-secret:latest'
       - '--quiet'
     id: Deploy
 

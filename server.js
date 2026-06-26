@@ -206,6 +206,47 @@ async function mapConcurrent(items, concurrency, fn) {
 
 // --- API Endpoints ---
 
+// Okta Token Exchange Proxy Endpoint (Public because it is part of authentication flow)
+app.post('/api/okta/token', async (req, res) => {
+  const { code, code_verifier, redirect_uri, token_endpoint, client_id, client_secret } = req.body;
+
+  if (!code || !code_verifier || !redirect_uri || !token_endpoint || !client_id) {
+    return res.status(400).json({ error: 'Missing required parameters' });
+  }
+
+  const oktaClientSecret = client_secret || process.env.OKTA_CLIENT_SECRET;
+  if (!oktaClientSecret) {
+    return res.status(500).json({ error: 'Backend error: OKTA_CLIENT_SECRET is not set on server or provided in request.' });
+  }
+
+  try {
+    const tokenExchangeBody = new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id: client_id,
+      client_secret: oktaClientSecret,
+      redirect_uri: redirect_uri,
+      code,
+      code_verifier: code_verifier,
+    });
+
+    const tokenResponse = await fetch(token_endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: tokenExchangeBody.toString(),
+    });
+
+    if (!tokenResponse.ok) {
+      const errText = await tokenResponse.text();
+      return res.status(tokenResponse.status).json({ error: `Okta token exchange failed: ${errText}` });
+    }
+
+    const tokenData = await tokenResponse.json();
+    res.json(tokenData);
+  } catch (err) {
+    res.status(500).json({ error: `Internal server error during exchange: ${err.message}` });
+  }
+});
+
 // 1. Server-Side Backup of Agents
 app.post('/api/backup/agents', authenticateToken, async (req, res) => {
   const { projectId, appLocation, collectionId, appId, assistantId, logLevel: bodyLogLevel } = req.body;
