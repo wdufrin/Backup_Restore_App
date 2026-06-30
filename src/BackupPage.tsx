@@ -406,6 +406,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
     targetAppUrl: string;
     bypassOwnerFilter?: boolean;
     enableAgentViewFallback?: boolean;
+    forceDownloadBackup?: boolean;
   }
 
   const [userTabConfig, setUserTabConfig] = useState<UserTabConfig>(() => {
@@ -420,6 +421,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
       targetAppUrl: import.meta.env.VITE_TARGET_APP_URL || '',
       bypassOwnerFilter: import.meta.env.VITE_BYPASS_OWNER_FILTER === 'true',
       enableAgentViewFallback: true, // Default to true
+      forceDownloadBackup: import.meta.env.VITE_FORCE_DOWNLOAD_BACKUP === 'true',
     };
   });
   const [isUserConfigModalOpen, setIsUserConfigModalOpen] = useState(false);
@@ -486,6 +488,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
       VITE_TARGET_APP_ID: runtimeConfig.VITE_TARGET_APP_ID || import.meta.env.VITE_TARGET_APP_ID,
       VITE_TARGET_APP_URL: runtimeConfig.VITE_TARGET_APP_URL || import.meta.env.VITE_TARGET_APP_URL,
       VITE_BYPASS_OWNER_FILTER: runtimeConfig.VITE_BYPASS_OWNER_FILTER !== undefined ? runtimeConfig.VITE_BYPASS_OWNER_FILTER : import.meta.env.VITE_BYPASS_OWNER_FILTER,
+      VITE_FORCE_DOWNLOAD_BACKUP: runtimeConfig.VITE_FORCE_DOWNLOAD_BACKUP !== undefined ? runtimeConfig.VITE_FORCE_DOWNLOAD_BACKUP : import.meta.env.VITE_FORCE_DOWNLOAD_BACKUP,
       VITE_DATASTORE_MAPPING: runtimeConfig.VITE_DATASTORE_MAPPING || import.meta.env.VITE_DATASTORE_MAPPING,
       VITE_COLLECTION_MAPPING: runtimeConfig.VITE_COLLECTION_MAPPING || import.meta.env.VITE_COLLECTION_MAPPING,
     };
@@ -501,6 +504,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
         targetAppUrl: base.VITE_TARGET_APP_URL || '',
         bypassOwnerFilter: base.VITE_BYPASS_OWNER_FILTER === 'true',
         enableAgentViewFallback: true,
+        forceDownloadBackup: base.VITE_FORCE_DOWNLOAD_BACKUP === 'true',
       });
     }
     
@@ -2274,7 +2278,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           addLog(`Warning: Failed to cache backup in browser: ${cacheErr.message}`);
         }
 
-        const forceDownload = import.meta.env.VITE_FORCE_DOWNLOAD_BACKUP === 'true';
+        const forceDownload = !!userTabConfig.forceDownloadBackup;
         if (!cacheSuccess || forceDownload) {
           if (forceDownload) {
             addLog(`Force download enabled. Triggering local backup file download.`);
@@ -3672,6 +3676,24 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                     </p>
                   </div>
                 </div>
+
+                <div className="flex items-start gap-2 border-t border-gray-50 pt-3">
+                  <input 
+                    type="checkbox" 
+                    id="forceDownloadBackup"
+                    checked={!!userTabConfig.forceDownloadBackup} 
+                    onChange={(e) => setUserTabConfig(prev => ({ ...prev, forceDownloadBackup: e.target.checked }))} 
+                    className="mt-1 w-4 h-4 rounded text-indigo-600 border-gray-300 focus:ring-indigo-500"
+                  />
+                  <div>
+                    <label htmlFor="forceDownloadBackup" className="text-sm font-medium text-gray-700 cursor-pointer select-none">
+                      Force Download Backup File
+                    </label>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Saves the configuration archive as a JSON file to your computer's downloads directory in addition to browser cache.
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -3831,12 +3853,14 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                         Ready: Browser cached backup loaded ({cachedBackupInfo.itemCount} items)
                       </span>
                     </div>
-                    <button 
-                      onClick={handleClearCachedBackup}
-                      className="text-xs text-red-600 hover:text-red-800 underline font-semibold"
-                    >
-                      Clear Cache & Upload file
-                    </button>
+                    {!!userTabConfig.forceDownloadBackup && (
+                      <button 
+                        onClick={handleClearCachedBackup}
+                        className="text-xs text-red-600 hover:text-red-800 underline font-semibold"
+                      >
+                        Clear Cache & Upload file
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <div className="w-full max-w-md mb-4">
@@ -3930,12 +3954,14 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                               Ready: Browser cached backup loaded ({cachedBackupInfo.itemCount} items)
                             </span>
                           </div>
-                          <button 
-                            onClick={handleClearCachedBackup}
-                            className="text-xs text-red-600 hover:text-red-800 underline font-semibold"
-                          >
-                            Clear Cache
-                          </button>
+                          {!!userTabConfig.forceDownloadBackup && (
+                            <button 
+                              onClick={handleClearCachedBackup}
+                              className="text-xs text-red-600 hover:text-red-800 underline font-semibold"
+                            >
+                              Clear Cache
+                            </button>
+                          )}
                         </div>
                       ) : (
                         <div className="w-full max-w-md mb-4">
@@ -4507,6 +4533,27 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                     </label>
                     <p className="text-[10px] text-gray-400 mt-0.5">
                       Falls back to structural detection and IAM queries if getAgentView returns a permission failure.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="adminForceDownloadBackup" 
+                    checked={!!userTabConfig.forceDownloadBackup} 
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setUserTabConfig(prev => ({ ...prev, forceDownloadBackup: checked }));
+                    }}
+                    className="mt-0.5 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
+                  />
+                  <div>
+                    <label htmlFor="adminForceDownloadBackup" className="text-xs text-gray-700 dark:text-white font-semibold cursor-pointer select-none">
+                      Force download backup file (Save locally in addition to browser cache)
+                    </label>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      Saves the backup file to your local computer's downloads directory. Disabling this enables zero-download migrations using the browser cache only.
                     </p>
                   </div>
                 </div>
