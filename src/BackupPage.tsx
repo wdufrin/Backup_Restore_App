@@ -2259,7 +2259,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
         
         const jsonStr = JSON.stringify(finalBackupData, null, 2);
         
-        // Write to IndexedDB cache
+        let cacheSuccess = false;
         try {
           await saveMigrationPayload(finalBackupData);
           addLog(`[Cache] Backup copy saved to browser cache for zero-download restore.`);
@@ -2269,10 +2269,18 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             timestamp: new Date().toISOString(),
             itemCount: filteredAgents.length + filteredNotebooks.length
           });
-          addLog(`Backup complete! Data cached in browser. Ready to switch accounts.`);
+          cacheSuccess = true;
         } catch (cacheErr: any) {
-          addLog(`Warning: Failed to cache backup in browser: ${cacheErr.message}. Falling back to file download.`);
-          
+          addLog(`Warning: Failed to cache backup in browser: ${cacheErr.message}`);
+        }
+
+        const forceDownload = import.meta.env.VITE_FORCE_DOWNLOAD_BACKUP === 'true';
+        if (!cacheSuccess || forceDownload) {
+          if (forceDownload) {
+            addLog(`Force download enabled. Triggering local backup file download.`);
+          } else {
+            addLog(`Falling back to local file download.`);
+          }
           const blob = new Blob([jsonStr], { type: 'application/json' });
           const url = URL.createObjectURL(blob);
           const link = document.createElement('a');
@@ -2284,6 +2292,8 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           URL.revokeObjectURL(url);
           
           addLog(`Backup complete! File downloaded: agentspace-user-backup__${userEmail}.json`);
+        } else {
+          addLog(`Backup complete! Data cached in browser. Ready to switch accounts.`);
         }
       });
     } else if (selectionModalAction === 'restore' || selectionModalAction === 'migrate') {
