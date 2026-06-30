@@ -1,0 +1,10 @@
+# Ignore local dependencies and build artifacts
+node_modules/
+dist/
+
+# Ignore git folder
+.git/
+.gitignore
+
+# Do NOT ignore .env so it gets sent to Cloud Build
+!.env
