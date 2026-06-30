@@ -2269,21 +2269,22 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             timestamp: new Date().toISOString(),
             itemCount: filteredAgents.length + filteredNotebooks.length
           });
+          addLog(`Backup complete! Data cached in browser. Ready to switch accounts.`);
         } catch (cacheErr: any) {
-          addLog(`Warning: Failed to cache backup in browser: ${cacheErr.message}`);
+          addLog(`Warning: Failed to cache backup in browser: ${cacheErr.message}. Falling back to file download.`);
+          
+          const blob = new Blob([jsonStr], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `agentspace-user-backup__${userEmail}.json`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          
+          addLog(`Backup complete! File downloaded: agentspace-user-backup__${userEmail}.json`);
         }
-
-        const blob = new Blob([jsonStr], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `agentspace-user-backup__${userEmail}.json`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        
-        addLog(`Backup complete! File downloaded: agentspace-user-backup__${userEmail}.json`);
       });
     } else if (selectionModalAction === 'restore' || selectionModalAction === 'migrate') {
       executeOperation('RestoreUserData', async () => {
