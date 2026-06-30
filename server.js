@@ -97,10 +97,12 @@ const authenticateToken = async (req, res, next) => {
 
     const tokenInfo = await response.json();
     
-    const allowedDomain = process.env.ALLOWED_EMAIL_DOMAIN;
-    if (allowedDomain && tokenInfo.email) {
-      if (!tokenInfo.email.endsWith(`@${allowedDomain}`)) {
-        return res.status(403).json({ error: `Forbidden: Email domain must be @${allowedDomain}` });
+    const allowedDomainsList = process.env.ALLOWED_EMAIL_DOMAIN;
+    if (allowedDomainsList && tokenInfo.email) {
+      const allowedDomains = allowedDomainsList.split(',').map(d => d.trim().toLowerCase());
+      const emailDomain = tokenInfo.email.split('@').pop()?.toLowerCase();
+      if (!emailDomain || !allowedDomains.includes(emailDomain)) {
+        return res.status(403).json({ error: `Forbidden: Email domain must be one of: ${allowedDomainsList}` });
       }
     }
 
