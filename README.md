@@ -285,7 +285,16 @@ When Admin Mode is enabled, a settings gear button is displayed on the login scr
     *   *Utility actions*: You can **Export** WIF settings to a local JSON file or **Import** them to quickly bootstrap settings on another client machine.
 *   **Google Auth tab** (visible when `VITE_ENABLE_GOOGLE_IDP` is enabled):
     *   **Google Client ID**: Configure the OAuth 2.0 Client ID for standard Google accounts.
-*   **Save & Reset**: Click **Save** to write settings to the browser's `localStorage` or **Reset** to restore default values from `.env`.
+*   **Okta tab** (visible when `VITE_ENABLE_OKTA_IDP` is enabled):
+    *   **User Project**: The Google Cloud project hosting the workforce pool.
+    *   **Pool ID**: The Okta WIF workforce pool ID.
+    *   **Provider ID**: The Okta WIF provider ID.
+    *   **Client ID**: The Client ID of your Okta application.
+    *   **Client Secret (Optional for SPA)**: Required only if using confidential Web Application mode. Leave empty if using Secret Manager or SPA mode.
+    *   **Use Backend Exchange (Web Application)**: Check this box if your Okta app is registered as a **Web Application**. This delegates OIDC token exchange to the backend (allowing server-side secrets from Secret Manager). Leave unchecked if using a standard **Single-Page Application (SPA)** flow.
+    *   **Auth Endpoint**: Okta tenant authorization endpoint.
+    *   **Redirect URI**: Your Okta redirect URI.
+*   **Save & Reset**: Click **Save** to write settings to the browser's `localStorage` or **Reset** to restore default values.
 
 ### 3. Creating Environmental Mappings
 Once logged in, open the **Admin View** tab to configure mappings:
@@ -300,6 +309,12 @@ Because this application is client-driven and backend services like Cloud Run ar
 1.  Customize variables or perform mapping configuration in the **Admin View**.
 2.  Click **Export Env Config** to download the generated settings.
 3.  Apply these settings back to your hosting provider (e.g. by setting Cloud Run environment variables or updating your code repository's `.env` / deployment manifests).
+
+### 5. Build-Time Defaults (.env.production) vs. Runtime Config
+The application utilizes a hybrid configuration layer to support seamless updates:
+*   **Build-time Defaults (`.env.production`)**: Git-based deployments (like Cloud Build GitHub Triggers) clone clean code where `.env` is ignored. `.env.production` is checked into the repository to bake secure public environment defaults directly into the production React bundle during compilation.
+*   **Runtime Config (`/api/config`)**: On startup, the browser queries the backend container environment variables. Any variables starting with `VITE_` configured on your Cloud Run service are dynamically fetched and merged on top of the build-time defaults.
+*   **Reset Behavior**: Clicking the **Reset** button clears local overrides and restores configuration to the active runtime variables (merged from Cloud Run environment variables and `.env.production` defaults).
 
 ---
 
