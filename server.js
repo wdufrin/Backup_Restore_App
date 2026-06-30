@@ -204,7 +204,16 @@ async function mapConcurrent(items, concurrency, fn) {
   return Promise.all(results);
 }
 
-// --- API Endpoints ---
+// Runtime Configuration Endpoint (exposes only non-sensitive VITE_ environment variables)
+app.get('/api/config', (req, res) => {
+  const publicEnv = {};
+  for (const key in process.env) {
+    if (key.startsWith('VITE_') && !key.toLowerCase().includes('secret') && !key.toLowerCase().includes('key')) {
+      publicEnv[key] = process.env[key];
+    }
+  }
+  res.json(publicEnv);
+});
 
 // Okta Token Exchange Proxy Endpoint (Public because it is part of authentication flow)
 app.post('/api/okta/token', async (req, res) => {

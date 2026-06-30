@@ -108,36 +108,89 @@ function App() {
  
  
  
+  const [runtimeConfig, setRuntimeConfig] = useState<any>(null);
+
+  useEffect(() => {
+    fetch('/api/config')
+      .then(res => {
+        if (!res.ok) throw new Error('Config endpoint not available');
+        return res.json();
+      })
+      .then(data => {
+        setRuntimeConfig(data);
+        
+        // Update states if no user overrides exist in localStorage
+        if (!localStorage.getItem('agentspace-featureFlags')) {
+          setFeatureFlags({
+            idpChangeEnabled: data.VITE_IDP_CHANGE_ENABLED === 'true',
+            enableGoogleIdp: data.VITE_ENABLE_GOOGLE_IDP !== 'false',
+            enableWifIdp: data.VITE_ENABLE_WIF_IDP !== 'false',
+            enableOktaIdp: data.VITE_ENABLE_OKTA_IDP === 'true'
+          });
+        }
+        if (!localStorage.getItem('agentspace-googleClientId') && data.VITE_GOOGLE_CLIENT_ID) {
+          setGoogleClientId(data.VITE_GOOGLE_CLIENT_ID);
+        }
+        if (!localStorage.getItem('agentspace-wifConfig')) {
+          setWifConfig({
+            userProject: data.VITE_WIF_USER_PROJECT || '',
+            poolId: data.VITE_WIF_POOL_ID || '',
+            providerId: data.VITE_WIF_PROVIDER_ID || '',
+            clientId: data.VITE_WIF_CLIENT_ID || '',
+            authEndpoint: data.VITE_WIF_AUTH_ENDPOINT || '',
+            redirectUri: data.VITE_WIF_REDIRECT_URI || '',
+          });
+        }
+        if (!localStorage.getItem('agentspace-oktaConfig')) {
+          setOktaConfig({
+            userProject: data.VITE_OKTA_USER_PROJECT || '',
+            poolId: data.VITE_OKTA_POOL_ID || '',
+            providerId: data.VITE_OKTA_PROVIDER_ID || '',
+            clientId: data.VITE_OKTA_CLIENT_ID || '',
+            clientSecret: data.VITE_OKTA_CLIENT_SECRET || '',
+            authEndpoint: data.VITE_OKTA_AUTH_ENDPOINT || '',
+            redirectUri: data.VITE_OKTA_REDIRECT_URI || '',
+          });
+        }
+      })
+      .catch(err => {
+        console.warn('Backend config endpoint not available. Using build-time configuration fallback.', err);
+      });
+  }, []);
+
   const tokenClient = useRef<any>(null);
  
   const handleResetWifConfig = () => {
     localStorage.removeItem('agentspace-wifConfig');
+    const base = runtimeConfig || import.meta.env;
     setWifConfig({
-      userProject: import.meta.env.VITE_WIF_USER_PROJECT || '',
-      poolId: import.meta.env.VITE_WIF_POOL_ID || '',
-      providerId: import.meta.env.VITE_WIF_PROVIDER_ID || '',
-      clientId: import.meta.env.VITE_WIF_CLIENT_ID || '',
-      authEndpoint: import.meta.env.VITE_WIF_AUTH_ENDPOINT || '',
-      redirectUri: import.meta.env.VITE_WIF_REDIRECT_URI || '',
+      userProject: base.VITE_WIF_USER_PROJECT || '',
+      poolId: base.VITE_WIF_POOL_ID || '',
+      providerId: base.VITE_WIF_PROVIDER_ID || '',
+      clientId: base.VITE_WIF_CLIENT_ID || '',
+      authEndpoint: base.VITE_WIF_AUTH_ENDPOINT || '',
+      redirectUri: base.VITE_WIF_REDIRECT_URI || '',
     });
   };
  
   const handleResetOktaConfig = () => {
     localStorage.removeItem('agentspace-oktaConfig');
+    const base = runtimeConfig || import.meta.env;
     setOktaConfig({
-      userProject: import.meta.env.VITE_OKTA_USER_PROJECT || '',
-      poolId: import.meta.env.VITE_OKTA_POOL_ID || '',
-      providerId: import.meta.env.VITE_OKTA_PROVIDER_ID || '',
-      clientId: import.meta.env.VITE_OKTA_CLIENT_ID || '',
-      clientSecret: import.meta.env.VITE_OKTA_CLIENT_SECRET || '',
-      authEndpoint: import.meta.env.VITE_OKTA_AUTH_ENDPOINT || '',
-      redirectUri: import.meta.env.VITE_OKTA_REDIRECT_URI || '',
+      userProject: base.VITE_OKTA_USER_PROJECT || '',
+      poolId: base.VITE_OKTA_POOL_ID || '',
+      providerId: base.VITE_OKTA_PROVIDER_ID || '',
+      clientId: base.VITE_OKTA_CLIENT_ID || '',
+      clientSecret: base.VITE_OKTA_CLIENT_SECRET || '',
+      authEndpoint: base.VITE_OKTA_AUTH_ENDPOINT || '',
+      redirectUri: base.VITE_OKTA_REDIRECT_URI || '',
     });
   };
 
   const handleResetGoogleConfig = () => {
     localStorage.removeItem('agentspace-googleClientId');
-    setGoogleClientId(import.meta.env.VITE_GOOGLE_CLIENT_ID || '');
+    const base = runtimeConfig || import.meta.env;
+    setGoogleClientId(base.VITE_GOOGLE_CLIENT_ID || '');
   };
 
   const handleSetAccessToken = useCallback((token: string) => {
@@ -584,6 +637,7 @@ function App() {
               setSourceIdp={setSourceIdp}
               targetIdp={targetIdp}
               setTargetIdp={setTargetIdp}
+              runtimeConfig={runtimeConfig}
             />
           ) : (
             <div className="flex flex-col items-center justify-center mt-20">

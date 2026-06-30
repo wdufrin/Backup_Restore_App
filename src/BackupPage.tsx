@@ -77,6 +77,7 @@ interface BackupPageProps {
   setSourceIdp: (idp: string) => void;
   targetIdp: string;
   setTargetIdp: (idp: string) => void;
+  runtimeConfig?: any;
 }
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -378,7 +379,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
   sourceIdp,
   setSourceIdp,
   targetIdp,
-  setTargetIdp
+  setTargetIdp,
+  runtimeConfig
 }) => {
   const [config, setConfig] = useState({
     appLocation: 'global',
@@ -467,6 +469,42 @@ const BackupPage: React.FC<BackupPageProps> = ({
     return saved === 'true';
   });
   const [isRestoreComplete, setIsRestoreComplete] = useState(false);
+
+  useEffect(() => {
+    if (!runtimeConfig) return;
+    
+    if (!localStorage.getItem('agentspace-userTabConfig')) {
+      setUserTabConfig({
+        sourceProject: runtimeConfig.VITE_SOURCE_PROJECT || '',
+        sourceLocation: runtimeConfig.VITE_SOURCE_LOCATION || 'global',
+        sourceAppId: runtimeConfig.VITE_SOURCE_APP_ID || '',
+        targetProject: runtimeConfig.VITE_TARGET_PROJECT || '',
+        targetLocation: runtimeConfig.VITE_TARGET_LOCATION || 'global',
+        targetAppId: runtimeConfig.VITE_TARGET_APP_ID || '',
+        targetAppUrl: runtimeConfig.VITE_TARGET_APP_URL || '',
+        bypassOwnerFilter: runtimeConfig.VITE_BYPASS_OWNER_FILTER === 'true',
+        enableAgentViewFallback: true,
+      });
+    }
+    
+    if (!localStorage.getItem('agentspace-datastoreMapping')) {
+      const envDsMapping = runtimeConfig.VITE_DATASTORE_MAPPING;
+      try {
+        setDatastoreMapping(envDsMapping ? JSON.parse(envDsMapping) : {});
+      } catch (e) {
+        setDatastoreMapping({});
+      }
+    }
+    
+    if (!localStorage.getItem('agentspace-collectionMapping')) {
+      const envCollMapping = runtimeConfig.VITE_COLLECTION_MAPPING;
+      try {
+        setCollectionMapping(envCollMapping ? JSON.parse(envCollMapping) : {});
+      } catch (e) {
+        setCollectionMapping({});
+      }
+    }
+  }, [runtimeConfig]);
 
   useEffect(() => {
     localStorage.setItem('agentspace-step1Complete', String(isStep1Complete));
@@ -771,43 +809,45 @@ const BackupPage: React.FC<BackupPageProps> = ({
     localStorage.removeItem('agentspace-sourceIdp');
     localStorage.removeItem('agentspace-targetIdp');
     localStorage.removeItem('agentspace-logLevel');
+    
+    const base = runtimeConfig || import.meta.env;
     setUserTabConfig({
-      sourceProject: import.meta.env.VITE_SOURCE_PROJECT || '',
-      sourceLocation: import.meta.env.VITE_SOURCE_LOCATION || 'global',
-      sourceAppId: import.meta.env.VITE_SOURCE_APP_ID || '',
-      targetProject: import.meta.env.VITE_TARGET_PROJECT || '',
-      targetLocation: import.meta.env.VITE_TARGET_LOCATION || 'global',
-      targetAppId: import.meta.env.VITE_TARGET_APP_ID || '',
-      targetAppUrl: import.meta.env.VITE_TARGET_APP_URL || '',
+      sourceProject: base.VITE_SOURCE_PROJECT || '',
+      sourceLocation: base.VITE_SOURCE_LOCATION || 'global',
+      sourceAppId: base.VITE_SOURCE_APP_ID || '',
+      targetProject: base.VITE_TARGET_PROJECT || '',
+      targetLocation: base.VITE_TARGET_LOCATION || 'global',
+      targetAppId: base.VITE_TARGET_APP_ID || '',
+      targetAppUrl: base.VITE_TARGET_APP_URL || '',
     });
     setFeatureFlags({
-      idpChangeEnabled: import.meta.env.VITE_IDP_CHANGE_ENABLED === 'true',
-      enableGoogleIdp: import.meta.env.VITE_ENABLE_GOOGLE_IDP !== 'false',
-      enableWifIdp: import.meta.env.VITE_ENABLE_WIF_IDP === 'true',
+      idpChangeEnabled: base.VITE_IDP_CHANGE_ENABLED === 'true',
+      enableGoogleIdp: base.VITE_ENABLE_GOOGLE_IDP !== 'false',
+      enableWifIdp: base.VITE_ENABLE_WIF_IDP === 'true',
     });
-    setGoogleClientId(import.meta.env.VITE_GOOGLE_CLIENT_ID || '');
+    setGoogleClientId(base.VITE_GOOGLE_CLIENT_ID || '');
     setWifConfigState({
-      userProject: import.meta.env.VITE_WIF_USER_PROJECT || '',
-      poolId: import.meta.env.VITE_WIF_POOL_ID || '',
-      providerId: import.meta.env.VITE_WIF_PROVIDER_ID || '',
-      clientId: import.meta.env.VITE_WIF_CLIENT_ID || '',
-      authEndpoint: import.meta.env.VITE_WIF_AUTH_ENDPOINT || '',
-      redirectUri: import.meta.env.VITE_WIF_REDIRECT_URI || '',
+      userProject: base.VITE_WIF_USER_PROJECT || '',
+      poolId: base.VITE_WIF_POOL_ID || '',
+      providerId: base.VITE_WIF_PROVIDER_ID || '',
+      clientId: base.VITE_WIF_CLIENT_ID || '',
+      authEndpoint: base.VITE_WIF_AUTH_ENDPOINT || '',
+      redirectUri: base.VITE_WIF_REDIRECT_URI || '',
     });
-    setSourceIdp(import.meta.env.VITE_SOURCE_IDP || 'Google');
-    setTargetIdp(import.meta.env.VITE_TARGET_IDP || 'Google');
-    setShouldMigrateAgents(import.meta.env.VITE_MIGRATE_AGENTS !== 'false');
-    setShouldMigrateNotebooks(import.meta.env.VITE_MIGRATE_NOTEBOOKS !== 'false');
-    setLogLevel((import.meta.env.VITE_LOG_LEVEL as LogLevel) || 'INFO');
+    setSourceIdp(base.VITE_SOURCE_IDP || 'Google');
+    setTargetIdp(base.VITE_TARGET_IDP || 'Google');
+    setShouldMigrateAgents(base.VITE_MIGRATE_AGENTS !== 'false');
+    setShouldMigrateNotebooks(base.VITE_MIGRATE_NOTEBOOKS !== 'false');
+    setLogLevel((base.VITE_LOG_LEVEL as LogLevel) || 'INFO');
 
-    const envDsMapping = import.meta.env.VITE_DATASTORE_MAPPING;
+    const envDsMapping = base.VITE_DATASTORE_MAPPING;
     try {
       setDatastoreMapping(envDsMapping ? JSON.parse(envDsMapping) : {});
     } catch (e) {
       setDatastoreMapping({});
     }
 
-    const envCollMapping = import.meta.env.VITE_COLLECTION_MAPPING;
+    const envCollMapping = base.VITE_COLLECTION_MAPPING;
     try {
       setCollectionMapping(envCollMapping ? JSON.parse(envCollMapping) : {});
     } catch (e) {
