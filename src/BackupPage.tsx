@@ -473,22 +473,36 @@ const BackupPage: React.FC<BackupPageProps> = ({
   useEffect(() => {
     if (!runtimeConfig) return;
     
+    // Merge runtime data on top of build-time env defaults
+    const base = {
+      VITE_SOURCE_PROJECT: runtimeConfig.VITE_SOURCE_PROJECT || import.meta.env.VITE_SOURCE_PROJECT,
+      VITE_SOURCE_LOCATION: runtimeConfig.VITE_SOURCE_LOCATION || import.meta.env.VITE_SOURCE_LOCATION,
+      VITE_SOURCE_APP_ID: runtimeConfig.VITE_SOURCE_APP_ID || import.meta.env.VITE_SOURCE_APP_ID,
+      VITE_TARGET_PROJECT: runtimeConfig.VITE_TARGET_PROJECT || import.meta.env.VITE_TARGET_PROJECT,
+      VITE_TARGET_LOCATION: runtimeConfig.VITE_TARGET_LOCATION || import.meta.env.VITE_TARGET_LOCATION,
+      VITE_TARGET_APP_ID: runtimeConfig.VITE_TARGET_APP_ID || import.meta.env.VITE_TARGET_APP_ID,
+      VITE_TARGET_APP_URL: runtimeConfig.VITE_TARGET_APP_URL || import.meta.env.VITE_TARGET_APP_URL,
+      VITE_BYPASS_OWNER_FILTER: runtimeConfig.VITE_BYPASS_OWNER_FILTER !== undefined ? runtimeConfig.VITE_BYPASS_OWNER_FILTER : import.meta.env.VITE_BYPASS_OWNER_FILTER,
+      VITE_DATASTORE_MAPPING: runtimeConfig.VITE_DATASTORE_MAPPING || import.meta.env.VITE_DATASTORE_MAPPING,
+      VITE_COLLECTION_MAPPING: runtimeConfig.VITE_COLLECTION_MAPPING || import.meta.env.VITE_COLLECTION_MAPPING,
+    };
+
     if (!localStorage.getItem('agentspace-userTabConfig')) {
       setUserTabConfig({
-        sourceProject: runtimeConfig.VITE_SOURCE_PROJECT || '',
-        sourceLocation: runtimeConfig.VITE_SOURCE_LOCATION || 'global',
-        sourceAppId: runtimeConfig.VITE_SOURCE_APP_ID || '',
-        targetProject: runtimeConfig.VITE_TARGET_PROJECT || '',
-        targetLocation: runtimeConfig.VITE_TARGET_LOCATION || 'global',
-        targetAppId: runtimeConfig.VITE_TARGET_APP_ID || '',
-        targetAppUrl: runtimeConfig.VITE_TARGET_APP_URL || '',
-        bypassOwnerFilter: runtimeConfig.VITE_BYPASS_OWNER_FILTER === 'true',
+        sourceProject: base.VITE_SOURCE_PROJECT || '',
+        sourceLocation: base.VITE_SOURCE_LOCATION || 'global',
+        sourceAppId: base.VITE_SOURCE_APP_ID || '',
+        targetProject: base.VITE_TARGET_PROJECT || '',
+        targetLocation: base.VITE_TARGET_LOCATION || 'global',
+        targetAppId: base.VITE_TARGET_APP_ID || '',
+        targetAppUrl: base.VITE_TARGET_APP_URL || '',
+        bypassOwnerFilter: base.VITE_BYPASS_OWNER_FILTER === 'true',
         enableAgentViewFallback: true,
       });
     }
     
     if (!localStorage.getItem('agentspace-datastoreMapping')) {
-      const envDsMapping = runtimeConfig.VITE_DATASTORE_MAPPING;
+      const envDsMapping = base.VITE_DATASTORE_MAPPING;
       try {
         setDatastoreMapping(envDsMapping ? JSON.parse(envDsMapping) : {});
       } catch (e) {
@@ -497,7 +511,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
     }
     
     if (!localStorage.getItem('agentspace-collectionMapping')) {
-      const envCollMapping = runtimeConfig.VITE_COLLECTION_MAPPING;
+      const envCollMapping = base.VITE_COLLECTION_MAPPING;
       try {
         setCollectionMapping(envCollMapping ? JSON.parse(envCollMapping) : {});
       } catch (e) {
