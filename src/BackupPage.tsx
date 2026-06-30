@@ -4321,6 +4321,18 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                     <label className="block text-xs text-gray-500 dark:text-white mb-1">Client Secret (Optional for SPA)</label>
                     <input type="password" placeholder="••••••••" value={oktaConfigState.clientSecret || ''} onChange={(e) => setOktaConfigState({...oktaConfigState, clientSecret: e.target.value})} className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" />
                   </div>
+                  <div className="flex items-center gap-2 pt-4 col-span-2">
+                    <input 
+                      type="checkbox" 
+                      id="pageOktaUseBackendExchange" 
+                      checked={!!oktaConfigState.useBackendExchange} 
+                      onChange={(e) => setOktaConfigState({...oktaConfigState, useBackendExchange: e.target.checked})}
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="pageOktaUseBackendExchange" className="text-xs font-semibold text-gray-700 dark:text-white cursor-pointer">
+                      Use Backend Exchange (Web Application)
+                    </label>
+                  </div>
                   <div className="col-span-2">
                     <label className="block text-xs text-gray-500 dark:text-white mb-1">Auth Endpoint</label>
                     <input type="text" value={oktaConfigState.authEndpoint} onChange={(e) => setOktaConfigState({...oktaConfigState, authEndpoint: e.target.value})} className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" />
