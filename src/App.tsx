@@ -186,7 +186,7 @@ function App() {
  
   const handleResetWifConfig = () => {
     localStorage.removeItem('agentspace-wifConfig');
-    const base = runtimeConfig || import.meta.env;
+    const base = { ...import.meta.env, ...runtimeConfig };
     setWifConfig({
       userProject: base.VITE_WIF_USER_PROJECT || '',
       poolId: base.VITE_WIF_POOL_ID || '',
@@ -199,7 +199,7 @@ function App() {
  
   const handleResetOktaConfig = () => {
     localStorage.removeItem('agentspace-oktaConfig');
-    const base = runtimeConfig || import.meta.env;
+    const base = { ...import.meta.env, ...runtimeConfig };
     setOktaConfig({
       userProject: base.VITE_OKTA_USER_PROJECT || '',
       poolId: base.VITE_OKTA_POOL_ID || '',
@@ -214,7 +214,7 @@ function App() {
 
   const handleResetGoogleConfig = () => {
     localStorage.removeItem('agentspace-googleClientId');
-    const base = runtimeConfig || import.meta.env;
+    const base = { ...import.meta.env, ...runtimeConfig };
     setGoogleClientId(base.VITE_GOOGLE_CLIENT_ID || '');
   };
 

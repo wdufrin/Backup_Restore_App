@@ -824,7 +824,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
     localStorage.removeItem('agentspace-targetIdp');
     localStorage.removeItem('agentspace-logLevel');
     
-    const base = runtimeConfig || import.meta.env;
+    const base = { ...import.meta.env, ...runtimeConfig };
     setUserTabConfig({
       sourceProject: base.VITE_SOURCE_PROJECT || '',
       sourceLocation: base.VITE_SOURCE_LOCATION || 'global',
