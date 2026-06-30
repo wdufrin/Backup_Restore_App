@@ -4264,7 +4264,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                     <input type="text" value={oktaConfigState.clientId} onChange={(e) => setOktaConfigState({...oktaConfigState, clientId: e.target.value})} className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 dark:text-white mb-1">Client Secret</label>
+                    <label className="block text-xs text-gray-500 dark:text-white mb-1">Client Secret (Optional for SPA)</label>
                     <input type="password" placeholder="••••••••" value={oktaConfigState.clientSecret || ''} onChange={(e) => setOktaConfigState({...oktaConfigState, clientSecret: e.target.value})} className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" />
                   </div>
                   <div className="col-span-2">

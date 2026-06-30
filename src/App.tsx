@@ -270,14 +270,15 @@ function App() {
       const authorizationEndpoint = oktaConfig.authEndpoint;
       const clientId = oktaConfig.clientId;
       const redirectUri = oktaConfig.redirectUri;
+      const useBackendExchange = !!oktaConfig.clientSecret;
 
-      console.log("Starting Okta sign in (backend exchange)...");
+      console.log(`Starting Okta sign in (backend exchange: ${useBackendExchange})...`);
       const { idToken, email, sub } = await api.signInWithOidcPopup(
         authorizationEndpoint, 
         clientId, 
         redirectUri, 
         undefined, 
-        true, 
+        useBackendExchange, 
         oktaConfig.clientSecret
       );
       console.log("Received ID Token from Okta, exchanging for STS token...");
@@ -771,7 +772,7 @@ function App() {
                         <input type="text" value={oktaConfig.clientId} onChange={(e) => setOktaConfig({...oktaConfig, clientId: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Client Secret</label>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Client Secret (Optional for SPA)</label>
                         <input type="password" placeholder="••••••••" value={oktaConfig.clientSecret || ''} onChange={(e) => setOktaConfig({...oktaConfig, clientSecret: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
                       </div>
                       <div>
