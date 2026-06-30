@@ -24,6 +24,7 @@ import type { SelectableItem } from './components/backup/RestoreSelectionModal';
 import ChatHistoryArchiveViewer from './components/backup/ChatHistoryArchiveViewer';
 import ClientSecretPrompt from './components/backup/ClientSecretPrompt';
 import CurlInfoModal from './components/CurlInfoModal';
+import { saveMigrationPayload, getMigrationPayload, clearMigrationPayload } from './utils/migrationDb';
 
 type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
 
@@ -469,6 +470,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
     return saved === 'true';
   });
   const [isRestoreComplete, setIsRestoreComplete] = useState(false);
+  const [cachedBackupInfo, setCachedBackupInfo] = useState<{ timestamp: string; itemCount: number } | null>(null);
+  const [isCachedBackupLoaded, setIsCachedBackupLoaded] = useState<boolean>(false);
 
   useEffect(() => {
     if (!runtimeConfig) return;
@@ -523,7 +526,28 @@ const BackupPage: React.FC<BackupPageProps> = ({
   useEffect(() => {
     localStorage.setItem('agentspace-step1Complete', String(isStep1Complete));
   }, [isStep1Complete]);
+  useEffect(() => {
+    getMigrationPayload().then(payload => {
+      if (payload && payload.data) {
+        setRestoreFileContent(JSON.stringify(payload.data));
+        setIsCachedBackupLoaded(true);
+        setCachedBackupInfo({
+          timestamp: payload.timestamp,
+          itemCount: (payload.data.agents?.length || 0) + (payload.data.notebooks?.length || 0)
+        });
+        addLog(`[Cache] Found active migration cache in browser. Pre-loaded backup data.`);
+      }
+    });
+  }, []);
 
+  const handleClearCachedBackup = () => {
+    clearMigrationPayload().then(() => {
+      setRestoreFileContent('');
+      setIsCachedBackupLoaded(false);
+      setCachedBackupInfo(null);
+      addLog(`[Cache] Browser migration cache cleared.`);
+    });
+  };
   // Feature flags, Google Client ID, and WIF config are now passed as props from App component for unified reactivity
 
   useEffect(() => {
@@ -2234,6 +2258,21 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
         };
         
         const jsonStr = JSON.stringify(finalBackupData, null, 2);
+        
+        // Write to IndexedDB cache
+        try {
+          await saveMigrationPayload(finalBackupData);
+          addLog(`[Cache] Backup copy saved to browser cache for zero-download restore.`);
+          setRestoreFileContent(jsonStr);
+          setIsCachedBackupLoaded(true);
+          setCachedBackupInfo({
+            timestamp: new Date().toISOString(),
+            itemCount: filteredAgents.length + filteredNotebooks.length
+          });
+        } catch (cacheErr: any) {
+          addLog(`Warning: Failed to cache backup in browser: ${cacheErr.message}`);
+        }
+
         const blob = new Blob([jsonStr], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -2437,6 +2476,13 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
 
         addLog(`Restore complete!`);
         setIsRestoreComplete(true);
+        // Clear IndexedDB cache since migration finished successfully
+        clearMigrationPayload().then(() => {
+          setRestoreFileContent('');
+          setIsCachedBackupLoaded(false);
+          setCachedBackupInfo(null);
+          addLog(`[Cache] Browser migration cache cleared automatically.`);
+        });
       });
     }
   };
@@ -3766,26 +3812,43 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               {/* Step 3: Restore to Target */}
               <div className={`mb-6 p-4 rounded-lg border ${isStep1Complete ? 'border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700' : 'border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 opacity-50'}`}>
                 <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-2">Step 3: Restore to Target</h3>
-                <div className="w-full max-w-md mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Upload Backup File for Restore</label>
-                  <input 
-                    type="file" 
-                    accept=".json"
-                    disabled={!isStep1Complete}
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      if (file) {
-                        const reader = new FileReader();
-                        reader.onload = (e) => {
-                          setRestoreFileContent(e.target?.result as string);
-                          addLog(`File selected: ${file.name}`);
-                        };
-                        reader.readAsText(file);
-                      }
-                    }}
-                    className="block w-full text-sm text-gray-500 dark:text-white file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 disabled:file:bg-gray-100 disabled:file:text-gray-400"
-                  />
-                </div>
+                {isCachedBackupLoaded && cachedBackupInfo ? (
+                  <div className="mb-4 p-3 bg-green-50 dark:bg-slate-800 border border-green-200 dark:border-slate-600 rounded-lg flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-green-500 animate-ping"></span>
+                      <span className="text-xs font-semibold text-green-800 dark:text-green-200">
+                        Ready: Browser cached backup loaded ({cachedBackupInfo.itemCount} items)
+                      </span>
+                    </div>
+                    <button 
+                      onClick={handleClearCachedBackup}
+                      className="text-xs text-red-600 hover:text-red-800 underline font-semibold"
+                    >
+                      Clear Cache & Upload file
+                    </button>
+                  </div>
+                ) : (
+                  <div className="w-full max-w-md mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Upload Backup File for Restore</label>
+                    <input 
+                      type="file" 
+                      accept=".json"
+                      disabled={!isStep1Complete}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = (e) => {
+                            setRestoreFileContent(e.target?.result as string);
+                            addLog(`File selected: ${file.name}`);
+                          };
+                          reader.readAsText(file);
+                        }
+                      }}
+                      className="block w-full text-sm text-gray-500 dark:text-white file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 disabled:file:bg-gray-100 disabled:file:text-gray-400"
+                    />
+                  </div>
+                )}
                 <button
                   onClick={handleUserRestoreCombined}
                   disabled={isLoading || !restoreFileContent || !userTabConfig.targetProject || !isStep1Complete}
@@ -3847,26 +3910,45 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                 
                 <div className="flex flex-col items-center justify-center py-4 space-y-6">
                   {import.meta.env.VITE_SINGLE_CLICK_MIGRATION !== 'true' && (
-                    <div className="w-full max-w-md mb-4">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Upload Backup File for Restore</label>
-                      <input 
-                        type="file" 
-                        accept=".json"
-                        disabled={!isStep1Complete}
-                        onChange={(event) => {
-                          const file = event.target.files?.[0];
-                          if (file) {
-                            const reader = new FileReader();
-                            reader.onload = (e) => {
-                              setRestoreFileContent(e.target?.result as string);
-                              addLog(`File selected: ${file.name}`);
-                            };
-                            reader.readAsText(file);
-                          }
-                        }}
-                        className="block w-full text-sm text-gray-500 dark:text-white file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 disabled:file:bg-gray-100 disabled:file:text-gray-400"
-                      />
-                    </div>
+                    <>
+                      {isCachedBackupLoaded && cachedBackupInfo ? (
+                        <div className="w-full max-w-md mb-4 p-3 bg-green-50 dark:bg-slate-800 border border-green-200 dark:border-slate-600 rounded-lg flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-green-500 animate-ping"></span>
+                            <span className="text-xs font-semibold text-green-800 dark:text-green-200">
+                              Ready: Browser cached backup loaded ({cachedBackupInfo.itemCount} items)
+                            </span>
+                          </div>
+                          <button 
+                            onClick={handleClearCachedBackup}
+                            className="text-xs text-red-600 hover:text-red-800 underline font-semibold"
+                          >
+                            Clear Cache
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="w-full max-w-md mb-4">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Upload Backup File for Restore</label>
+                           <input 
+                            type="file" 
+                            accept=".json"
+                            disabled={!isStep1Complete}
+                            onChange={(event) => {
+                              const file = event.target.files?.[0];
+                              if (file) {
+                                const reader = new FileReader();
+                                reader.onload = (e) => {
+                                  setRestoreFileContent(e.target?.result as string);
+                                  addLog(`File selected: ${file.name}`);
+                                };
+                                reader.readAsText(file);
+                              }
+                            }}
+                            className="block w-full text-sm text-gray-500 dark:text-white file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 disabled:file:bg-gray-100 disabled:file:text-gray-400"
+                          />
+                        </div>
+                      )}
+                    </>
                   )}
 
                   {import.meta.env.VITE_SINGLE_CLICK_MIGRATION === 'true' ? (
