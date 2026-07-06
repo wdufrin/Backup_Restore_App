@@ -38,7 +38,7 @@ The application supports three distinct modes of operation depending on configur
 
 ## 2. Architecture & How It Works
 
-The application decouples lightweight configuration management (client-side) from resource-heavy parallel API processing (server-side).
+The application runs entirely client-side as a Single Page Application (SPA) in the user's browser, executing all operations directly against Google Cloud endpoints and identity providers.
 
 ### Component Architecture
 
@@ -55,10 +55,6 @@ graph TD
         STS["Google STS (sts.googleapis.com)"]
     end
 
-    subgraph Backend ["Application Backend"]
-        Express["Node Express Server (server.js)"]
-    end
-
     subgraph GoogleCloud ["Google Cloud API Endpoints"]
         DE["Discovery Engine (*.discoveryengine.googleapis.com)"]
         GCS["Cloud Storage (storage.googleapis.com)"]
@@ -70,24 +66,16 @@ graph TD
     Frontend -- "2. Entra ID Login (HTTPS/443)" --> IdP
     Frontend -- "3. Exchange STS Token (HTTPS/443)" --> STS
     
-    Frontend -- "4. Backup/Restore Requests (HTTP/HTTPS)" --> Express
+    Frontend -- "4. Fetch/Restore Agents & IAM (HTTPS/443)" --> DE
     GAPI -- "5. GCS Upload/Download (HTTPS/443)" --> GCS
     GAPI -- "6. Trigger builds & check logs (HTTPS/443)" --> CB
-    
-    Express -- "7. Fetch/Restore Agents & IAM (HTTPS/443)" --> DE
 ```
 
 ### Client-Side App (React SPA)
 *   **State Management**: Access tokens and user profiles are held strictly in `sessionStorage` to mitigate Cross-Site Scripting (XSS) risks.
-*   **Direct-to-GCP Operations**: Utilizes Google's client-side API loader (`gapi.js`) to directly list GCS buckets, stream objects, and query Cloud Build logs, avoiding backend bottlenecks.
-*   **OIDC PKCE Authentication**: Orchestrates browser-popup login flows for Microsoft Entra ID, subsequently querying Google's Security Token Service (STS) to obtain a Google Cloud token for Workforce Identity Federation (WIF).
-
-### Server-Side App (Express Backend)
-*   **Static Serving**: Compiles the React SPA and serves the static production build (`/dist`).
-*   **Concurrency Management**: Employs a custom dependency-free queue scheduler (`mapConcurrent`) to orchestrate API calls in parallel:
-    *   **Backup**: Fetches agent configurations, views, and IAM policies in parallel with a limit of 15 concurrent tasks.
-    *   **Restore**: Creates restored agents, resolves data mapping conflicts, and merges IAM permissions with a limit of 10 concurrent tasks.
-*   **Payload Transformation**: Dynamically replaces source variables (e.g., project numbers, locations, engine IDs) inside agent JSON schemas before submitting them to the target environment.
+*   **Direct-to-GCP Operations**: Utilizes Google's client-side API loader (`gapi.js`) and direct authenticated browser fetches to interact with GCS, check Cloud Build logs, and query Discovery Engine.
+*   **OIDC PKCE Authentication**: Orchestrates browser-popup login flows for Microsoft Entra ID / Okta, subsequently querying Google's Security Token Service (STS) to obtain a Google Cloud token for Workforce Identity Federation (WIF).
+*   **Concurrency Management**: Runs a client-side concurrency loop (`mapConcurrent`) to retrieve agent resources and restore configs in parallel batches without overloading network streams.
 
 ---
 
@@ -96,8 +84,7 @@ graph TD
 All communication between the user's browser, the application host, identity providers, and Google Cloud endpoints is secured over SSL/TLS.
 
 ### Local Development Network Flow
-*   **Frontend Dev Server**: Listens on TCP port `5173` (HTTP). Proxies all calls matching `/api/*` internally to the backend.
-*   **Backend Server**: Listens on TCP port `8080` (HTTP).
+*   **Frontend Dev Server**: Listens on TCP port `5173` (HTTP).
 
 ### GKE Ingress Port Mapping
 
@@ -105,7 +92,7 @@ All communication between the user's browser, the application host, identity pro
 graph LR
     User([User Browser]) -- "HTTPS / TCP 443" --> Ingress[Kubernetes Ingress]
     Ingress -- "HTTP / TCP 80 (Internal)" --> Service[NodePort Service]
-    Service -- "HTTP / TCP 8080 (TargetPort)" --> Pod[Express Pod]
+    Service -- "HTTP / TCP 8080 (TargetPort)" --> Pod[Nginx Pod]
 ```
 
 ### Network Endpoints & Ports
@@ -113,14 +100,13 @@ graph LR
 | Source | Destination | Hostname / URL | Port | Protocol | Purpose |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | User Browser | App Host (Vite Dev) | `localhost` | 5173 | HTTP | Local frontend development server |
-| User Browser | App Host (Express) | `localhost` | 8080 | HTTP | Local backend service endpoint |
 | User Browser | App Ingress | `backup.ge-dufrin.com` | 443 | HTTPS | Production application entry point |
 | User Browser | Google Sign-in | `accounts.google.com` | 443 | HTTPS | Client Google authentication |
 | User Browser | Microsoft Entra | `login.microsoftonline.com` | 443 | HTTPS | Client WIF/OIDC identity provider login |
 | User Browser | Google STS | `sts.googleapis.com` | 443 | HTTPS | Exchanging identity provider token for GCP access token |
 | User Browser | GCS API | `storage.googleapis.com` | 443 | HTTPS | Directly listing and downloading GCS assets |
 | User Browser | Cloud Build API | `cloudbuild.googleapis.com` | 443 | HTTPS | Directly tracking agent build details and logs |
-| Express Server | Discovery Engine | `*.discoveryengine.googleapis.com` | 443 | HTTPS | Bulk retrieval and creation of agent/engine configurations |
+| User Browser | Discovery Engine | `*.discoveryengine.googleapis.com` | 443 | HTTPS | Bulk retrieval and creation of agent/engine configurations |
 
 ---
 
@@ -194,18 +180,12 @@ Deploying the application involves:
     cp .env.example .env
     ```
 
-4.  **Launch the Servers**:
-    Open two terminals to run the frontend and backend side-by-side:
-    *   **Terminal 1 (Vite Frontend)**:
-        ```bash
-        npm run dev
-        ```
-        The client interface will run on `http://localhost:5173`.
-    *   **Terminal 2 (Express Backend)**:
-        ```bash
-        npm run server
-        ```
-        The server API will run on `http://localhost:8080`.
+4.  **Launch the Application**:
+    Run the Vite development server:
+    ```bash
+    npm run dev
+    ```
+    The client interface will run on `http://localhost:5173`.
 
 ---
 
