@@ -111,76 +111,7 @@ function App() {
  
   const [runtimeConfig, setRuntimeConfig] = useState<any>(null);
 
-  useEffect(() => {
-    fetch('/api/config')
-      .then(res => {
-        if (!res.ok) throw new Error('Config endpoint not available');
-        return res.json();
-      })
-      .then(data => {
-        setRuntimeConfig(data);
-        
-        // Merge runtime data on top of build-time env defaults
-        const base = {
-          VITE_IDP_CHANGE_ENABLED: data.VITE_IDP_CHANGE_ENABLED !== undefined ? data.VITE_IDP_CHANGE_ENABLED : import.meta.env.VITE_IDP_CHANGE_ENABLED,
-          VITE_ENABLE_GOOGLE_IDP: data.VITE_ENABLE_GOOGLE_IDP !== undefined ? data.VITE_ENABLE_GOOGLE_IDP : import.meta.env.VITE_ENABLE_GOOGLE_IDP,
-          VITE_ENABLE_WIF_IDP: data.VITE_ENABLE_WIF_IDP !== undefined ? data.VITE_ENABLE_WIF_IDP : import.meta.env.VITE_ENABLE_WIF_IDP,
-          VITE_ENABLE_OKTA_IDP: data.VITE_ENABLE_OKTA_IDP !== undefined ? data.VITE_ENABLE_OKTA_IDP : import.meta.env.VITE_ENABLE_OKTA_IDP,
-          VITE_GOOGLE_CLIENT_ID: data.VITE_GOOGLE_CLIENT_ID || import.meta.env.VITE_GOOGLE_CLIENT_ID,
-          VITE_WIF_USER_PROJECT: data.VITE_WIF_USER_PROJECT || import.meta.env.VITE_WIF_USER_PROJECT,
-          VITE_WIF_POOL_ID: data.VITE_WIF_POOL_ID || import.meta.env.VITE_WIF_POOL_ID,
-          VITE_WIF_PROVIDER_ID: data.VITE_WIF_PROVIDER_ID || import.meta.env.VITE_WIF_PROVIDER_ID,
-          VITE_WIF_CLIENT_ID: data.VITE_WIF_CLIENT_ID || import.meta.env.VITE_WIF_CLIENT_ID,
-          VITE_WIF_AUTH_ENDPOINT: data.VITE_WIF_AUTH_ENDPOINT || import.meta.env.VITE_WIF_AUTH_ENDPOINT,
-          VITE_WIF_REDIRECT_URI: data.VITE_WIF_REDIRECT_URI || import.meta.env.VITE_WIF_REDIRECT_URI,
-          VITE_OKTA_USER_PROJECT: data.VITE_OKTA_USER_PROJECT || import.meta.env.VITE_OKTA_USER_PROJECT,
-          VITE_OKTA_POOL_ID: data.VITE_OKTA_POOL_ID || import.meta.env.VITE_OKTA_POOL_ID,
-          VITE_OKTA_PROVIDER_ID: data.VITE_OKTA_PROVIDER_ID || import.meta.env.VITE_OKTA_PROVIDER_ID,
-          VITE_OKTA_CLIENT_ID: data.VITE_OKTA_CLIENT_ID || import.meta.env.VITE_OKTA_CLIENT_ID,
-          VITE_OKTA_CLIENT_SECRET: data.VITE_OKTA_CLIENT_SECRET || import.meta.env.VITE_OKTA_CLIENT_SECRET,
-          VITE_OKTA_AUTH_ENDPOINT: data.VITE_OKTA_AUTH_ENDPOINT || import.meta.env.VITE_OKTA_AUTH_ENDPOINT,
-          VITE_OKTA_REDIRECT_URI: data.VITE_OKTA_REDIRECT_URI || import.meta.env.VITE_OKTA_REDIRECT_URI,
-        };
 
-        // Update states if no user overrides exist in localStorage
-        if (!localStorage.getItem('agentspace-featureFlags')) {
-          setFeatureFlags({
-            idpChangeEnabled: base.VITE_IDP_CHANGE_ENABLED === 'true',
-            enableGoogleIdp: base.VITE_ENABLE_GOOGLE_IDP !== 'false',
-            enableWifIdp: base.VITE_ENABLE_WIF_IDP !== 'false',
-            enableOktaIdp: base.VITE_ENABLE_OKTA_IDP === 'true'
-          });
-        }
-        if (!localStorage.getItem('agentspace-googleClientId') && base.VITE_GOOGLE_CLIENT_ID) {
-          setGoogleClientId(base.VITE_GOOGLE_CLIENT_ID);
-        }
-        if (!localStorage.getItem('agentspace-wifConfig')) {
-          setWifConfig({
-            userProject: base.VITE_WIF_USER_PROJECT || '',
-            poolId: base.VITE_WIF_POOL_ID || '',
-            providerId: base.VITE_WIF_PROVIDER_ID || '',
-            clientId: base.VITE_WIF_CLIENT_ID || '',
-            authEndpoint: base.VITE_WIF_AUTH_ENDPOINT || '',
-            redirectUri: base.VITE_WIF_REDIRECT_URI || '',
-          });
-        }
-        if (!localStorage.getItem('agentspace-oktaConfig')) {
-          setOktaConfig({
-            userProject: base.VITE_OKTA_USER_PROJECT || '',
-            poolId: base.VITE_OKTA_POOL_ID || '',
-            providerId: base.VITE_OKTA_PROVIDER_ID || '',
-            clientId: base.VITE_OKTA_CLIENT_ID || '',
-            clientSecret: base.VITE_OKTA_CLIENT_SECRET || '',
-            authEndpoint: base.VITE_OKTA_AUTH_ENDPOINT || '',
-            redirectUri: base.VITE_OKTA_REDIRECT_URI || '',
-            useBackendExchange: data.VITE_OKTA_USE_BACKEND_EXCHANGE === 'true' || import.meta.env.VITE_OKTA_USE_BACKEND_EXCHANGE === 'true',
-          });
-        }
-      })
-      .catch(err => {
-        console.warn('Backend config endpoint not available. Using build-time configuration fallback.', err);
-      });
-  }, []);
 
   const tokenClient = useRef<any>(null);
  
