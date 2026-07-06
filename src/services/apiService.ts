@@ -2367,61 +2367,400 @@ export const getUserInfo = async (accessToken: string) => {
     return response.json();
 };
 
-export const backupAgentsServerSide = async (config: Config, logLevel?: string) => {
-    const response = await fetch('/api/backup/agents', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${config.accessToken}`
-        },
-        body: JSON.stringify({
-            projectId: config.projectId,
-            appLocation: config.appLocation,
-            collectionId: config.collectionId || 'default_collection',
-            appId: config.appId,
-            assistantId: config.assistantId || 'default_assistant',
-            logLevel
-        })
-    });
-    if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || `Server backup failed: ${response.statusText}`);
+const VALID_LOCATIONS = new Set([
+  'global', 'us', 'eu', 'us-central1', 'us-east1', 'us-east4', 'us-west1',
+  'europe-west1', 'europe-west3', 'europe-west9', 'asia-east1', 'asia-northeast1'
+]);
+
+const validateConfigParams = (params: any) => {
+  const { projectId, appLocation, collectionId, appId, assistantId } = params;
+
+  if (projectId && !/^[a-z0-9-]+$/i.test(projectId)) {
+    throw new Error('Invalid projectId format (alphanumeric and hyphens only)');
+  }
+  if (appLocation && !VALID_LOCATIONS.has(appLocation)) {
+    throw new Error('Invalid or unapproved appLocation');
+  }
+  if (collectionId && !/^[a-z0-9-_]+$/i.test(collectionId)) {
+    throw new Error('Invalid collectionId format');
+  }
+  if (appId && !/^[a-z0-9-_]+$/i.test(appId)) {
+    throw new Error('Invalid appId format');
+  }
+  if (assistantId && !/^[a-z0-9-_]+$/i.test(assistantId)) {
+    throw new Error('Invalid assistantId format');
+  }
+};
+
+async function mapConcurrent<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: Promise<R>[] = [];
+  const executing = new Set<Promise<any>>();
+  for (const item of items) {
+    const p = Promise.resolve().then(() => fn(item));
+    results.push(p);
+    executing.add(p);
+    const clean = () => executing.delete(p);
+    p.then(clean, clean);
+    if (executing.size >= concurrency) {
+      await Promise.race(executing);
     }
-    return response.json();
+  }
+  return Promise.all(results);
+}
+
+export const backupAgentsServerSide = async (config: Config, logLevel: string = 'INFO') => {
+  const { projectId, appLocation, collectionId = 'default_collection', appId, assistantId = 'default_assistant', accessToken } = config;
+
+  if (!projectId || !appLocation || !collectionId || !appId || !assistantId) {
+    throw new Error('Missing required configuration fields');
+  }
+
+  validateConfigParams({ projectId, appLocation, collectionId, appId, assistantId });
+
+  const logs: string[] = [];
+  const addLog = (msg: string) => {
+    const formatted = `[${new Date().toISOString()}] ${msg}`;
+    logs.push(formatted);
+    console.log(formatted);
+  };
+
+  try {
+    addLog(`Starting client-side backup for agents in Assistant: ${assistantId}...`);
+    const baseUrl = getDiscoveryEngineUrl(appLocation);
+    
+    // Step A: List all agents (paginated)
+    const agents: any[] = [];
+    let pageToken: string | undefined = undefined;
+    do {
+      let url = `${baseUrl}/${DISCOVERY_API_VERSION}/projects/${projectId}/locations/${appLocation}/collections/${collectionId}/engines/${appId}/assistants/${assistantId}/agents?pageSize=200`;
+      if (pageToken) url += `&pageToken=${pageToken}`;
+      
+      const response = await gapiRequest<any>(url, 'GET', projectId, undefined, undefined, undefined, false, accessToken);
+      agents.push(...(response.agents || []));
+      pageToken = response.nextPageToken;
+    } while (pageToken);
+
+    addLog(`Found ${agents.length} agent(s) in project. Fetching views and policies in parallel...`);
+
+    // Step B: Fetch Agent Views and IAM Policies in parallel (Concurrency Limit: 15)
+    const lowCodeAgents: any[] = [];
+    await mapConcurrent(agents, 15, async (agent: any) => {
+      try {
+        // Fetch Agent View to check type
+        let isLowCode = true;
+        try {
+          const rawResponse = await gapiRequest<any>(`${baseUrl}/${DISCOVERY_API_VERSION}/${agent.name}:getAgentView`, 'GET', projectId, undefined, undefined, undefined, true, accessToken);
+          const agentView = rawResponse?.agentView || rawResponse;
+          const rawAgentType = agentView?.agentType;
+          if (rawAgentType && rawAgentType !== 'LOW_CODE' && rawAgentType !== 'Low Code') {
+            isLowCode = false;
+          }
+        } catch (viewErr: any) {
+          // Fallback check if agent view fails
+          if (agent.adkAgentDefinition || agent.a2aAgentDefinition) {
+            isLowCode = false;
+          }
+        }
+
+        if (!isLowCode) {
+          return;
+        }
+
+        // Fetch IAM Policy
+        let policy = null;
+        try {
+          policy = await gapiRequest<any>(`${baseUrl}/${DISCOVERY_API_VERSION}/${agent.name}:getIamPolicy`, 'GET', projectId, undefined, undefined, undefined, true, accessToken);
+        } catch (iamErr: any) {
+          addLog(`Warning: Failed to fetch IAM policy for agent ${agent.name}: ${iamErr.message}`);
+        }
+
+        const agentWithPolicy = { ...agent };
+        if (policy) {
+          agentWithPolicy.iamPolicy = policy;
+        }
+        lowCodeAgents.push(agentWithPolicy);
+      } catch (err: any) {
+        addLog(`Error backing up agent details for ${agent.name}: ${err.message}`);
+      }
+    });
+
+    addLog(`Backup complete. Compiled ${lowCodeAgents.length} low-code agent(s).`);
+    return { agents: lowCodeAgents, logs };
+  } catch (err: any) {
+    addLog(`Critical backup failure: ${err.message}`);
+    return { agents: [], logs, error: err.message };
+  }
 };
 
 export const restoreAgentsServerSide = async (
     restoreConfig: Config,
     agents: Agent[],
-    datastoreMapping: Record<string, string>,
-    collectionMapping: Record<string, string>,
-    sourceConfig?: any,
-    logLevel?: string
+    datastoreMapping: Record<string, string> = {},
+    collectionMapping: Record<string, string> = {},
+    sourceConfig: any = null,
+    logLevel: string = 'INFO'
 ) => {
-    const response = await fetch('/api/restore/agents', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${restoreConfig.accessToken}`
-        },
-        body: JSON.stringify({
-            restoreConfig: {
-                projectId: restoreConfig.projectId,
-                appLocation: restoreConfig.appLocation,
-                collectionId: restoreConfig.collectionId || 'default_collection',
-                appId: restoreConfig.appId,
-                assistantId: restoreConfig.assistantId || 'default_assistant'
-            },
-            agents,
-            datastoreMapping,
-            collectionMapping,
-            sourceConfig,
-            logLevel
-        })
+  const { projectId, appLocation, collectionId = 'default_collection', appId, assistantId = 'default_assistant', accessToken } = restoreConfig;
+
+  if (!projectId || !appLocation || !collectionId || !appId || !assistantId) {
+    throw new Error('Missing target configuration parameters');
+  }
+
+  validateConfigParams({ projectId, appLocation, collectionId, appId, assistantId });
+  if (sourceConfig) {
+    validateConfigParams({
+      projectId: sourceConfig.projectId,
+      appLocation: sourceConfig.appLocation,
+      collectionId: sourceConfig.collectionId,
+      appId: sourceConfig.appId,
+      assistantId: sourceConfig.assistantId
     });
-    if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || `Server restore failed: ${response.statusText}`);
+  }
+
+  const logs: string[] = [];
+  const addLog = (msg: string) => {
+    const formatted = `[${new Date().toISOString()}] ${msg}`;
+    logs.push(formatted);
+    console.log(formatted);
+  };
+
+  try {
+    addLog(`Starting client-side restore of ${agents.length} agent(s)...`);
+    const baseUrl = getDiscoveryEngineUrl(appLocation);
+
+    // Step A: List existing target agents to detect duplicates
+    const existingAgents: any[] = [];
+    let pageToken: string | undefined = undefined;
+    try {
+      do {
+        let url = `${baseUrl}/${DISCOVERY_API_VERSION}/projects/${projectId}/locations/${appLocation}/collections/${collectionId}/engines/${appId}/assistants/${assistantId}/agents?pageSize=200`;
+        if (pageToken) url += `&pageToken=${pageToken}`;
+        const res = await gapiRequest<any>(url, 'GET', projectId, undefined, undefined, undefined, false, accessToken);
+        existingAgents.push(...(res.agents || []));
+        pageToken = res.nextPageToken;
+      } while (pageToken);
+      addLog(`Target project check: Found ${existingAgents.length} existing agent(s).`);
+    } catch (e: any) {
+      addLog(`Warning: Failed to list existing target agents for duplication check: ${e.message}`);
     }
-    return response.json();
+
+    // Step B: Helper to build payloads
+    const buildPayload = (currentAgent: any) => {
+      const finalStarterPrompts = (currentAgent.starterPrompts || [])
+        .map((p: any) => p.text ? p.text.trim() : '')
+        .filter((text: string) => text)
+        .map((text: string) => ({ text }));
+
+      let restoredDisplayName = currentAgent.displayName;
+      if (currentAgent.dataStoreConnections && currentAgent.dataStoreConnections.length > 0) {
+        restoredDisplayName = `[Replace] ${restoredDisplayName}`;
+      }
+
+      const payload: any = {
+        displayName: restoredDisplayName,
+        description: currentAgent.description || '',
+        icon: currentAgent.icon || undefined,
+        starterPrompts: finalStarterPrompts.length > 0 ? finalStarterPrompts : undefined,
+        authorizationConfig: currentAgent.authorizationConfig,
+        authorizations: !currentAgent.authorizationConfig ? currentAgent.authorizations : undefined,
+      };
+
+      const blacklist = ['name', 'createTime', 'updateTime', 'agentIdentityInfo', 'iamPolicy', 'agentType', 'disabled', 'disabledReason', 'category'];
+      for (const key of Object.keys(currentAgent)) {
+        if (!blacklist.includes(key) && !(key in payload)) {
+          payload[key] = currentAgent[key];
+        }
+      }
+
+      // Remap datastores
+      if (payload.dataStoreConnections) {
+        const rewrittenConnections = [];
+        for (const conn of payload.dataStoreConnections) {
+          if (conn.dataStore) {
+            const parts = conn.dataStore.split('/');
+            const colIndex = parts.indexOf('collections');
+            const oldColId = colIndex !== -1 ? parts[colIndex + 1] : 'default_collection';
+            const oldDsId = conn.dataStore.split('/').pop();
+
+            if (!oldDsId) {
+              rewrittenConnections.push(conn);
+              continue;
+            }
+
+            const mappedTargetId = datastoreMapping[oldDsId];
+            if (mappedTargetId === undefined || mappedTargetId === '') {
+              addLog(`Warning: Datastore '${oldDsId}' is not mapped. Skipping this connection.`);
+              continue;
+            }
+
+            const targetLocation = appLocation || 'global';
+            let targetCollection = 'default_collection';
+            if (oldColId && collectionMapping[oldColId]) {
+              targetCollection = collectionMapping[oldColId];
+            }
+
+            rewrittenConnections.push({
+              ...conn,
+              dataStore: `projects/${projectId}/locations/${targetLocation}/collections/${targetCollection}/dataStores/${mappedTargetId}`
+            });
+          } else {
+            rewrittenConnections.push(conn);
+          }
+        }
+
+        // Deduplicate
+        const seenDataStores = new Set<string>();
+        payload.dataStoreConnections = rewrittenConnections.filter((conn) => {
+          if (conn.dataStore) {
+            if (seenDataStores.has(conn.dataStore)) return false;
+            seenDataStores.add(conn.dataStore);
+          }
+          return true;
+        });
+      }
+
+      // Remap authorizations
+      const rewriteAuth = (authName: string) => {
+        if (!authName) return authName;
+        const authId = authName.split('/').pop();
+        return `projects/${projectId}/locations/${appLocation || 'global'}/authorizations/${authId}`;
+      };
+
+      if (payload.authorizationConfig?.toolAuthorizations) {
+        payload.authorizationConfig.toolAuthorizations = payload.authorizationConfig.toolAuthorizations.map(rewriteAuth);
+      }
+      if (payload.authorizations) {
+        payload.authorizations = payload.authorizations.map(rewriteAuth);
+      }
+
+      // Replacements on agent definition
+      const definitionKeys = Object.keys(payload).filter(key => key.toLowerCase().includes('agentdefinition'));
+      for (const key of definitionKeys) {
+        let definition = payload[key];
+        if (definition) {
+          if (definition.session) {
+            delete definition.session;
+          }
+          if (definition.agentFiles) {
+            delete definition.agentFiles;
+          }
+          if (definition.deployedAgentFiles) {
+            delete definition.deployedAgentFiles;
+          }
+
+          let defStr = JSON.stringify(definition);
+
+          const nameParts = currentAgent.name.split('/');
+          const engineIndex = nameParts.indexOf('engines');
+          const oldEngineId = engineIndex !== -1 ? nameParts[engineIndex + 1] : null;
+
+          if (oldEngineId && appId) {
+            defStr = defStr.split(oldEngineId).join(appId);
+          }
+          if (sourceConfig && sourceConfig.projectId) {
+            defStr = defStr.split(sourceConfig.projectId).join(projectId);
+          }
+          const oldProjectNumber = nameParts[1];
+          if (oldProjectNumber) {
+            defStr = defStr.split(oldProjectNumber).join(projectId);
+          }
+          if (sourceConfig && sourceConfig.appLocation) {
+            defStr = defStr.split(sourceConfig.appLocation).join(appLocation);
+          }
+          const oldLocation = nameParts[3];
+          if (oldLocation) {
+            defStr = defStr.split(`/locations/${oldLocation}/`).join(`/locations/${appLocation}/`);
+          }
+
+          // Remap collection & datastore references inside definition payload safely
+          Object.entries(collectionMapping)
+            .sort((a, b) => b[0].length - a[0].length)
+            .forEach(([oldColId, newColId]) => {
+              defStr = defStr.split(`/collections/${oldColId}/`).join(`/collections/${newColId}/`);
+            });
+
+          Object.entries(datastoreMapping)
+            .sort((a, b) => b[0].length - a[0].length)
+            .forEach(([oldDsId, newDsId]) => {
+              if (newDsId) {
+                defStr = defStr.split(`/dataStores/${oldDsId}`).join(`/dataStores/${newDsId}`);
+              }
+            });
+
+          definition = JSON.parse(defStr);
+        }
+        payload[key] = definition;
+      }
+
+      return payload;
+    };
+
+    // Step C: Restore agents in parallel (Concurrency Limit: 10)
+    await mapConcurrent(agents, 10, async (agent: any) => {
+      const originalAgentId = agent.name.split('/').pop();
+      addLog(`Preparing to restore agent: ${agent.displayName} (original ID: ${originalAgentId})`);
+
+      const createPayload = buildPayload(agent);
+      let targetAgentName = '';
+      let targetAgentId = '';
+
+      try {
+        const targetId = agent.targetId || undefined;
+        let createUrl = `${baseUrl}/${DISCOVERY_API_VERSION}/projects/${projectId}/locations/${appLocation}/collections/${collectionId}/engines/${appId}/assistants/${assistantId}/agents`;
+        if (targetId) {
+          createUrl += `?agentId=${targetId}`;
+        }
+
+        const newAgent = await gapiRequest<any>(createUrl, 'POST', projectId, undefined, createPayload, undefined, false, accessToken);
+        targetAgentName = newAgent.name;
+        targetAgentId = targetAgentName.split('/').pop() || '';
+        addLog(`CREATED: Agent '${agent.displayName}' created with new ID '${targetAgentId}'.`);
+
+        // Restore IAM Policy
+        if (agent.iamPolicy && agent.iamPolicy.bindings) {
+          const hasAgentUser = agent.iamPolicy.bindings.some((b: any) => b.role === 'roles/discoveryengine.agentUser');
+          if (hasAgentUser) {
+            try {
+              const currentPolicy = await gapiRequest<any>(`${baseUrl}/${DISCOVERY_API_VERSION}/${targetAgentName}:getIamPolicy`, 'GET', projectId, undefined, undefined, undefined, true, accessToken);
+              
+              const mappedBindings = agent.iamPolicy.bindings.map((b: any) => {
+                if (b.role === 'roles/discoveryengine.agentOwner') {
+                  return { ...b, role: 'roles/discoveryengine.agentEditor' };
+                }
+                return b;
+              });
+
+              const mergedBindings = currentPolicy.bindings ? [...currentPolicy.bindings] : [];
+              mappedBindings.forEach((backupBinding: any) => {
+                const existingBinding = mergedBindings.find((b: any) => b.role === backupBinding.role);
+                if (existingBinding) {
+                  existingBinding.members = Array.from(new Set([...(existingBinding.members || []), ...(backupBinding.members || [])]));
+                } else {
+                  mergedBindings.push(backupBinding);
+                }
+              });
+
+              const payloadPolicy = {
+                bindings: mergedBindings,
+                etag: currentPolicy.etag
+              };
+
+              await gapiRequest<any>(`${baseUrl}/${DISCOVERY_API_VERSION}/${targetAgentName}:setIamPolicy`, 'POST', projectId, undefined, { policy: payloadPolicy }, undefined, false, accessToken);
+              addLog(`IAM policy restored for agent: ${targetAgentId}`);
+            } catch (iamErr: any) {
+              addLog(`Warning: Failed to apply IAM policy for agent ${targetAgentId}: ${iamErr.message}`);
+            }
+          }
+        }
+      } catch (err: any) {
+        addLog(`Failed to restore agent ${agent.displayName}: ${err.message}`);
+      }
+    });
+
+    addLog('Restore processing completed.');
+    return { success: true, logs };
+  } catch (err: any) {
+    addLog(`Critical restore failure: ${err.message}`);
+    return { success: false, logs, error: err.message };
+  }
 };

@@ -476,21 +476,21 @@ const BackupPage: React.FC<BackupPageProps> = ({
   const [isCachedBackupLoaded, setIsCachedBackupLoaded] = useState<boolean>(false);
 
   useEffect(() => {
-    if (!runtimeConfig) return;
+    const runtime = runtimeConfig || {};
     
     // Merge runtime data on top of build-time env defaults
     const base = {
-      VITE_SOURCE_PROJECT: runtimeConfig.VITE_SOURCE_PROJECT || import.meta.env.VITE_SOURCE_PROJECT,
-      VITE_SOURCE_LOCATION: runtimeConfig.VITE_SOURCE_LOCATION || import.meta.env.VITE_SOURCE_LOCATION,
-      VITE_SOURCE_APP_ID: runtimeConfig.VITE_SOURCE_APP_ID || import.meta.env.VITE_SOURCE_APP_ID,
-      VITE_TARGET_PROJECT: runtimeConfig.VITE_TARGET_PROJECT || import.meta.env.VITE_TARGET_PROJECT,
-      VITE_TARGET_LOCATION: runtimeConfig.VITE_TARGET_LOCATION || import.meta.env.VITE_TARGET_LOCATION,
-      VITE_TARGET_APP_ID: runtimeConfig.VITE_TARGET_APP_ID || import.meta.env.VITE_TARGET_APP_ID,
-      VITE_TARGET_APP_URL: runtimeConfig.VITE_TARGET_APP_URL || import.meta.env.VITE_TARGET_APP_URL,
-      VITE_BYPASS_OWNER_FILTER: runtimeConfig.VITE_BYPASS_OWNER_FILTER !== undefined ? runtimeConfig.VITE_BYPASS_OWNER_FILTER : import.meta.env.VITE_BYPASS_OWNER_FILTER,
-      VITE_FORCE_DOWNLOAD_BACKUP: runtimeConfig.VITE_FORCE_DOWNLOAD_BACKUP !== undefined ? runtimeConfig.VITE_FORCE_DOWNLOAD_BACKUP : import.meta.env.VITE_FORCE_DOWNLOAD_BACKUP,
-      VITE_DATASTORE_MAPPING: runtimeConfig.VITE_DATASTORE_MAPPING || import.meta.env.VITE_DATASTORE_MAPPING,
-      VITE_COLLECTION_MAPPING: runtimeConfig.VITE_COLLECTION_MAPPING || import.meta.env.VITE_COLLECTION_MAPPING,
+      VITE_SOURCE_PROJECT: runtime.VITE_SOURCE_PROJECT || import.meta.env.VITE_SOURCE_PROJECT,
+      VITE_SOURCE_LOCATION: runtime.VITE_SOURCE_LOCATION || import.meta.env.VITE_SOURCE_LOCATION,
+      VITE_SOURCE_APP_ID: runtime.VITE_SOURCE_APP_ID || import.meta.env.VITE_SOURCE_APP_ID,
+      VITE_TARGET_PROJECT: runtime.VITE_TARGET_PROJECT || import.meta.env.VITE_TARGET_PROJECT,
+      VITE_TARGET_LOCATION: runtime.VITE_TARGET_LOCATION || import.meta.env.VITE_TARGET_LOCATION,
+      VITE_TARGET_APP_ID: runtime.VITE_TARGET_APP_ID || import.meta.env.VITE_TARGET_APP_ID,
+      VITE_TARGET_APP_URL: runtime.VITE_TARGET_APP_URL || import.meta.env.VITE_TARGET_APP_URL,
+      VITE_BYPASS_OWNER_FILTER: runtime.VITE_BYPASS_OWNER_FILTER !== undefined ? runtime.VITE_BYPASS_OWNER_FILTER : import.meta.env.VITE_BYPASS_OWNER_FILTER,
+      VITE_FORCE_DOWNLOAD_BACKUP: runtime.VITE_FORCE_DOWNLOAD_BACKUP !== undefined ? runtime.VITE_FORCE_DOWNLOAD_BACKUP : import.meta.env.VITE_FORCE_DOWNLOAD_BACKUP,
+      VITE_DATASTORE_MAPPING: runtime.VITE_DATASTORE_MAPPING || import.meta.env.VITE_DATASTORE_MAPPING,
+      VITE_COLLECTION_MAPPING: runtime.VITE_COLLECTION_MAPPING || import.meta.env.VITE_COLLECTION_MAPPING,
     };
 
     if (!localStorage.getItem('agentspace-userTabConfig')) {
