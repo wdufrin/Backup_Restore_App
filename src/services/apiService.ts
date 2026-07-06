@@ -692,7 +692,7 @@ export const getDataConnector = async (config: Config) => {
     const baseUrl = getDiscoveryEngineUrl(appLocation);
     // Note: The API is singleton per collection
     const url = `${baseUrl}/${DISCOVERY_API_VERSION}/projects/${projectId}/locations/${appLocation}/collections/${collectionId || 'default_collection'}/dataConnector`;
-    return gapiRequest<any>(url, 'GET', projectId);
+    return gapiRequest<any>(url, 'GET', projectId, undefined, undefined, undefined, true);
 };
 
 export const listDocuments = async (dataStoreName: string, config: Config) => {

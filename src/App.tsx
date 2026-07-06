@@ -369,7 +369,8 @@ function App() {
   };
 
   const exportOktaConfig = () => {
-    const jsonStr = JSON.stringify(oktaConfig, null, 2);
+    const { clientSecret, useBackendExchange, ...safeConfig } = oktaConfig as any;
+    const jsonStr = JSON.stringify(safeConfig, null, 2);
     const blob = new Blob([jsonStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -389,8 +390,9 @@ function App() {
     reader.onload = (e) => {
       try {
         const json = JSON.parse(e.target?.result as string);
-        setOktaConfig(json);
-        localStorage.setItem('agentspace-oktaConfig', JSON.stringify(json));
+        const { clientSecret, useBackendExchange, ...safeConfig } = json;
+        setOktaConfig(safeConfig);
+        localStorage.setItem('agentspace-oktaConfig', JSON.stringify(safeConfig));
         alert(`Okta configuration imported successfully from ${file.name}`);
       } catch (err: any) {
         alert(`Error importing Okta configuration: ${err.message}`);
