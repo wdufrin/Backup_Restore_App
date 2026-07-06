@@ -94,10 +94,8 @@ function App() {
       poolId: import.meta.env.VITE_OKTA_POOL_ID || '',
       providerId: import.meta.env.VITE_OKTA_PROVIDER_ID || '',
       clientId: import.meta.env.VITE_OKTA_CLIENT_ID || '',
-      clientSecret: import.meta.env.VITE_OKTA_CLIENT_SECRET || '',
       authEndpoint: import.meta.env.VITE_OKTA_AUTH_ENDPOINT || '',
       redirectUri: import.meta.env.VITE_OKTA_REDIRECT_URI || '',
-      useBackendExchange: import.meta.env.VITE_OKTA_USE_BACKEND_EXCHANGE === 'true',
     };
   });
   const [isWifModalOpen, setIsWifModalOpen] = useState(false);
@@ -136,10 +134,8 @@ function App() {
       poolId: base.VITE_OKTA_POOL_ID || '',
       providerId: base.VITE_OKTA_PROVIDER_ID || '',
       clientId: base.VITE_OKTA_CLIENT_ID || '',
-      clientSecret: base.VITE_OKTA_CLIENT_SECRET || '',
       authEndpoint: base.VITE_OKTA_AUTH_ENDPOINT || '',
       redirectUri: base.VITE_OKTA_REDIRECT_URI || '',
-      useBackendExchange: base.VITE_OKTA_USE_BACKEND_EXCHANGE === 'true',
     });
   };
 
@@ -279,16 +275,13 @@ function App() {
       const authorizationEndpoint = oktaConfig.authEndpoint;
       const clientId = oktaConfig.clientId;
       const redirectUri = oktaConfig.redirectUri;
-      const useBackendExchange = !!oktaConfig.useBackendExchange;
 
-      console.log(`Starting Okta sign in (backend exchange: ${useBackendExchange})...`);
+      console.log("Starting Okta sign in...");
       const { idToken, email, sub } = await api.signInWithOidcPopup(
         authorizationEndpoint, 
         clientId, 
         redirectUri, 
-        undefined, 
-        useBackendExchange, 
-        oktaConfig.clientSecret
+        undefined
       );
       console.log("Received ID Token from Okta, exchanging for STS token...");
 
@@ -781,22 +774,7 @@ function App() {
                         <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Client ID</label>
                         <input type="text" value={oktaConfig.clientId} onChange={(e) => setOktaConfig({...oktaConfig, clientId: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Client Secret (Optional for SPA)</label>
-                        <input type="password" placeholder="••••••••" value={oktaConfig.clientSecret || ''} onChange={(e) => setOktaConfig({...oktaConfig, clientSecret: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
-                      </div>
-                      <div className="flex items-center gap-2 pt-2">
-                        <input 
-                          type="checkbox" 
-                          id="oktaUseBackendExchange" 
-                          checked={!!oktaConfig.useBackendExchange} 
-                          onChange={(e) => setOktaConfig({...oktaConfig, useBackendExchange: e.target.checked})}
-                          className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                        />
-                        <label htmlFor="oktaUseBackendExchange" className="text-xs font-semibold text-gray-700 dark:text-slate-300 cursor-pointer">
-                          Use Backend Exchange (Web Application)
-                        </label>
-                      </div>
+
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Auth Endpoint</label>
                         <input type="text" value={oktaConfig.authEndpoint} onChange={(e) => setOktaConfig({...oktaConfig, authEndpoint: e.target.value})} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
