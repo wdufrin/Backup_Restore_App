@@ -627,6 +627,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
     content += `VITE_IDP_CHANGE_ENABLED=${featureFlags.idpChangeEnabled}\n`;
     content += `VITE_ENABLE_GOOGLE_IDP=${featureFlags.enableGoogleIdp}\n`;
     content += `VITE_ENABLE_WIF_IDP=${featureFlags.enableWifIdp}\n`;
+    content += `VITE_ENABLE_OKTA_IDP=${featureFlags.enableOktaIdp || false}\n`;
     content += `VITE_GOOGLE_CLIENT_ID=${googleClientId}\n`;
     content += `VITE_LOG_LEVEL=${logLevel}\n\n`;
 
@@ -672,11 +673,13 @@ const BackupPage: React.FC<BackupPageProps> = ({
     content += `VITE_OKTA_CLIENT_ID=${oktaConfigState.clientId}\n`;
     content += `VITE_OKTA_CLIENT_SECRET=${oktaConfigState.clientSecret || ''}\n`;
     content += `VITE_OKTA_AUTH_ENDPOINT=${oktaConfigState.authEndpoint}\n`;
-    content += `VITE_OKTA_REDIRECT_URI=${oktaConfigState.redirectUri}\n\n`;
+    content += `VITE_OKTA_REDIRECT_URI=${oktaConfigState.redirectUri}\n`;
+    content += `VITE_OKTA_USE_BACKEND_EXCHANGE=${oktaConfigState.useBackendExchange || false}\n\n`;
 
     content += `# --- Migration Settings ---\n`;
     content += `VITE_MIGRATE_AGENTS=${shouldMigrateAgents}\n`;
-    content += `VITE_MIGRATE_NOTEBOOKS=${shouldMigrateNotebooks}\n\n`;
+    content += `VITE_MIGRATE_NOTEBOOKS=${shouldMigrateNotebooks}\n`;
+    content += `VITE_FORCE_DOWNLOAD_BACKUP=${userTabConfig.forceDownloadBackup || false}\n\n`;
 
     content += `# --- Mappings ---\n`;
     content += `VITE_DATASTORE_MAPPING='${JSON.stringify(datastoreMapping)}'\n`;
@@ -755,6 +758,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
             targetAppUrl: config.VITE_TARGET_APP_URL || '',
             bypassOwnerFilter: config.VITE_BYPASS_OWNER_FILTER === 'true',
             enableAgentViewFallback: config.VITE_ENABLE_AGENT_VIEW_FALLBACK !== 'false', // Default to true if missing/not set to false
+            forceDownloadBackup: config.VITE_FORCE_DOWNLOAD_BACKUP === 'true',
           };
           setUserTabConfig(newUserTabConfig);
 
@@ -776,11 +780,25 @@ const BackupPage: React.FC<BackupPageProps> = ({
             });
           }
 
+          if (config.VITE_OKTA_USER_PROJECT) {
+            setOktaConfigState({
+              userProject: config.VITE_OKTA_USER_PROJECT || '',
+              poolId: config.VITE_OKTA_POOL_ID || '',
+              providerId: config.VITE_OKTA_PROVIDER_ID || '',
+              clientId: config.VITE_OKTA_CLIENT_ID || '',
+              clientSecret: config.VITE_OKTA_CLIENT_SECRET || '',
+              authEndpoint: config.VITE_OKTA_AUTH_ENDPOINT || '',
+              redirectUri: config.VITE_OKTA_REDIRECT_URI || '',
+              useBackendExchange: config.VITE_OKTA_USE_BACKEND_EXCHANGE === 'true',
+            });
+          }
+
           if (config.VITE_IDP_CHANGE_ENABLED) {
             setFeatureFlags({
               idpChangeEnabled: config.VITE_IDP_CHANGE_ENABLED === 'true',
               enableGoogleIdp: config.VITE_ENABLE_GOOGLE_IDP !== 'false',
               enableWifIdp: config.VITE_ENABLE_WIF_IDP === 'true',
+              enableOktaIdp: config.VITE_ENABLE_OKTA_IDP === 'true',
             });
           }
 
