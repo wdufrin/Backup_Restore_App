@@ -347,6 +347,26 @@ function App() {
     sessionStorage.removeItem('agentspace-userProfile');
   };
 
+  const handleSwitchIdp = async () => {
+    setAccessToken('');
+    setSourceToken('');
+    setTargetToken('');
+    setUserProfile(null);
+    sessionStorage.removeItem('agentspace-accessToken');
+    sessionStorage.removeItem('agentspace-sourceToken');
+    sessionStorage.removeItem('agentspace-targetToken');
+    sessionStorage.removeItem('agentspace-userProfile');
+
+    console.log(`Auto-triggering sign-in for Target IDP: ${targetIdp}`);
+    if (targetIdp === 'Google') {
+      handleGoogleSignIn();
+    } else if (targetIdp === 'WiF') {
+      await handleWifSignIn('target');
+    } else if (targetIdp === 'Okta') {
+      await handleOktaSignIn('target');
+    }
+  };
+
   const exportWifConfig = () => {
     const jsonStr = JSON.stringify(wifConfig, null, 2);
     const blob = new Blob([jsonStr], { type: 'application/json' });
@@ -575,7 +595,7 @@ function App() {
               onGoogleSignIn={handleGoogleSignIn}
               onWifSignIn={handleWifSignIn} 
               onOktaSignIn={handleOktaSignIn} 
-              onSignOut={handleSignOut}
+              onSignOut={handleSwitchIdp}
               projectNumber={projectNumber} 
               setProjectNumber={(num) => {
                 setProjectNumber(num);
