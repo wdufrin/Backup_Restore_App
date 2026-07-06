@@ -104,9 +104,19 @@ function App() {
     if (import.meta.env.VITE_ENABLE_OKTA_IDP === 'true') return 'okta';
     return 'google';
   });
- 
- 
- 
+  useEffect(() => {
+    const bothEnabled = featureFlags.enableWifIdp && featureFlags.enableOktaIdp;
+    if (!bothEnabled) {
+      if (sourceIdp === 'Okta') {
+        setSourceIdp('WiF');
+        localStorage.setItem('agentspace-sourceIdp', 'WiF');
+      }
+      if (targetIdp === 'Okta') {
+        setTargetIdp('WiF');
+        localStorage.setItem('agentspace-targetIdp', 'WiF');
+      }
+    }
+  }, [featureFlags.enableWifIdp, featureFlags.enableOktaIdp, sourceIdp, targetIdp]);
   const [runtimeConfig, setRuntimeConfig] = useState<any>(null);
 
 
@@ -645,8 +655,12 @@ function App() {
                   className="bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white"
                 >
                   {featureFlags.enableGoogleIdp && <option value="Google">Google</option>}
-                  {featureFlags.enableWifIdp && <option value="WiF">WiF</option>}
-                  {featureFlags.enableOktaIdp && <option value="Okta">Okta</option>}
+                  {(featureFlags.enableWifIdp || featureFlags.enableOktaIdp) && (
+                    <option value="WiF">
+                      {(featureFlags.enableWifIdp && featureFlags.enableOktaIdp) ? 'EntraID' : 'WiF'}
+                    </option>
+                  )}
+                  {(featureFlags.enableWifIdp && featureFlags.enableOktaIdp) && <option value="Okta">OKTA</option>}
                 </select>
               </div>
               <div>
@@ -657,8 +671,12 @@ function App() {
                   className="bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white"
                 >
                   {featureFlags.enableGoogleIdp && <option value="Google">Google</option>}
-                  {featureFlags.enableWifIdp && <option value="WiF">WiF</option>}
-                  {featureFlags.enableOktaIdp && <option value="Okta">Okta</option>}
+                  {(featureFlags.enableWifIdp || featureFlags.enableOktaIdp) && (
+                    <option value="WiF">
+                      {(featureFlags.enableWifIdp && featureFlags.enableOktaIdp) ? 'EntraID' : 'WiF'}
+                    </option>
+                  )}
+                  {(featureFlags.enableWifIdp && featureFlags.enableOktaIdp) && <option value="Okta">OKTA</option>}
                 </select>
               </div>
             </div>
