@@ -4149,9 +4149,17 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                     onChange={(e) => setSourceIdp(e.target.value)}
                     className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white"
                   >
-                    <option value="Google">Google</option>
-                    <option value="WiF">WiF</option>
-                    <option value="Okta">Okta</option>
+                    {featureFlags.enableGoogleIdp && <option value="Google">Google</option>}
+                    {featureFlags.enableWifIdp && (
+                      <option value="WiF">
+                        {featureFlags.enableOktaIdp ? 'EntraID' : 'WiF'}
+                      </option>
+                    )}
+                    {featureFlags.enableOktaIdp && (
+                      <option value="Okta">
+                        {featureFlags.enableWifIdp ? 'OKTA' : 'WiF'}
+                      </option>
+                    )}
                   </select>
                 </div>
                 <div>
@@ -4259,9 +4267,17 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                     onChange={(e) => setTargetIdp(e.target.value)}
                     className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white"
                   >
-                    <option value="Google">Google</option>
-                    <option value="WiF">WiF</option>
-                    <option value="Okta">Okta</option>
+                    {featureFlags.enableGoogleIdp && <option value="Google">Google</option>}
+                    {featureFlags.enableWifIdp && (
+                      <option value="WiF">
+                        {featureFlags.enableOktaIdp ? 'EntraID' : 'WiF'}
+                      </option>
+                    )}
+                    {featureFlags.enableOktaIdp && (
+                      <option value="Okta">
+                        {featureFlags.enableWifIdp ? 'OKTA' : 'WiF'}
+                      </option>
+                    )}
                   </select>
                 </div>
                 <div>

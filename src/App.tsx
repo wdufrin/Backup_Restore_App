@@ -104,19 +104,33 @@ function App() {
     if (import.meta.env.VITE_ENABLE_OKTA_IDP === 'true') return 'okta';
     return 'google';
   });
+  // Validate and fall back sourceIdp and targetIdp if they are disabled
   useEffect(() => {
-    const bothEnabled = featureFlags.enableWifIdp && featureFlags.enableOktaIdp;
-    if (!bothEnabled) {
-      if (sourceIdp === 'Okta') {
-        setSourceIdp('WiF');
-        localStorage.setItem('agentspace-sourceIdp', 'WiF');
+    const enabledIdps = [];
+    if (featureFlags.enableGoogleIdp) enabledIdps.push('Google');
+    if (featureFlags.enableWifIdp) enabledIdps.push('WiF');
+    if (featureFlags.enableOktaIdp) enabledIdps.push('Okta');
+
+    if (enabledIdps.length > 0) {
+      if (!enabledIdps.includes(sourceIdp)) {
+        const fallback = enabledIdps[0];
+        setSourceIdp(fallback);
       }
-      if (targetIdp === 'Okta') {
-        setTargetIdp('WiF');
-        localStorage.setItem('agentspace-targetIdp', 'WiF');
+      if (!enabledIdps.includes(targetIdp)) {
+        const fallback = enabledIdps[0];
+        setTargetIdp(fallback);
       }
     }
-  }, [featureFlags.enableWifIdp, featureFlags.enableOktaIdp, sourceIdp, targetIdp]);
+  }, [featureFlags.enableGoogleIdp, featureFlags.enableWifIdp, featureFlags.enableOktaIdp, sourceIdp, targetIdp]);
+
+  // Sync sourceIdp and targetIdp to localStorage when they change
+  useEffect(() => {
+    localStorage.setItem('agentspace-sourceIdp', sourceIdp);
+  }, [sourceIdp]);
+
+  useEffect(() => {
+    localStorage.setItem('agentspace-targetIdp', targetIdp);
+  }, [targetIdp]);
   const [runtimeConfig, setRuntimeConfig] = useState<any>(null);
 
 
@@ -675,12 +689,16 @@ function App() {
                   className="bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white"
                 >
                   {featureFlags.enableGoogleIdp && <option value="Google">Google</option>}
-                  {(featureFlags.enableWifIdp || featureFlags.enableOktaIdp) && (
+                  {featureFlags.enableWifIdp && (
                     <option value="WiF">
-                      {(featureFlags.enableWifIdp && featureFlags.enableOktaIdp) ? 'EntraID' : 'WiF'}
+                      {featureFlags.enableOktaIdp ? 'EntraID' : 'WiF'}
                     </option>
                   )}
-                  {(featureFlags.enableWifIdp && featureFlags.enableOktaIdp) && <option value="Okta">OKTA</option>}
+                  {featureFlags.enableOktaIdp && (
+                    <option value="Okta">
+                      {featureFlags.enableWifIdp ? 'OKTA' : 'WiF'}
+                    </option>
+                  )}
                 </select>
               </div>
               <div>
@@ -691,12 +709,16 @@ function App() {
                   className="bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white"
                 >
                   {featureFlags.enableGoogleIdp && <option value="Google">Google</option>}
-                  {(featureFlags.enableWifIdp || featureFlags.enableOktaIdp) && (
+                  {featureFlags.enableWifIdp && (
                     <option value="WiF">
-                      {(featureFlags.enableWifIdp && featureFlags.enableOktaIdp) ? 'EntraID' : 'WiF'}
+                      {featureFlags.enableOktaIdp ? 'EntraID' : 'WiF'}
                     </option>
                   )}
-                  {(featureFlags.enableWifIdp && featureFlags.enableOktaIdp) && <option value="Okta">OKTA</option>}
+                  {featureFlags.enableOktaIdp && (
+                    <option value="Okta">
+                      {featureFlags.enableWifIdp ? 'OKTA' : 'WiF'}
+                    </option>
+                  )}
                 </select>
               </div>
             </div>
@@ -899,27 +921,6 @@ function App() {
                 <button 
                   onClick={() => {
                     localStorage.setItem('agentspace-featureFlags', JSON.stringify(featureFlags));
-                    
-                    let finalSource = sourceIdp;
-                    let finalTarget = targetIdp;
-                    
-                    const enabledIdps = [];
-                    if (featureFlags.enableGoogleIdp) enabledIdps.push('Google');
-                    if (featureFlags.enableWifIdp) enabledIdps.push('WiF');
-                    if (featureFlags.enableOktaIdp) enabledIdps.push('Okta');
-                    
-                    if (!enabledIdps.includes(finalSource)) {
-                      finalSource = enabledIdps[0] || 'Google';
-                      setSourceIdp(finalSource);
-                    }
-                    if (!enabledIdps.includes(finalTarget)) {
-                      finalTarget = enabledIdps[0] || 'Google';
-                      setTargetIdp(finalTarget);
-                    }
-                    
-                    localStorage.setItem('agentspace-sourceIdp', finalSource);
-                    localStorage.setItem('agentspace-targetIdp', finalTarget);
-
                     if (featureFlags.enableWifIdp) {
                       localStorage.setItem('agentspace-wifConfig', JSON.stringify(wifConfig));
                     }
