@@ -18,12 +18,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import type { Agent, AppEngine, Authorization, Config, ReasoningEngine, GcsBucket, Collection, DataStore } from './types';
 import * as api from './services/apiService';
-import ProjectInput from './components/ProjectInput';
 import RestoreSelectionModal from './components/backup/RestoreSelectionModal';
 import type { SelectableItem } from './components/backup/RestoreSelectionModal';
 import ChatHistoryArchiveViewer from './components/backup/ChatHistoryArchiveViewer';
 import ClientSecretPrompt from './components/backup/ClientSecretPrompt';
-import CurlInfoModal from './components/CurlInfoModal';
 import { saveMigrationPayload, getMigrationPayload, clearMigrationPayload } from './utils/migrationDb';
 
 type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
@@ -671,10 +669,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
     content += `VITE_OKTA_POOL_ID=${oktaConfigState.poolId}\n`;
     content += `VITE_OKTA_PROVIDER_ID=${oktaConfigState.providerId}\n`;
     content += `VITE_OKTA_CLIENT_ID=${oktaConfigState.clientId}\n`;
-    content += `VITE_OKTA_CLIENT_SECRET=${oktaConfigState.clientSecret || ''}\n`;
     content += `VITE_OKTA_AUTH_ENDPOINT=${oktaConfigState.authEndpoint}\n`;
-    content += `VITE_OKTA_REDIRECT_URI=${oktaConfigState.redirectUri}\n`;
-    content += `VITE_OKTA_USE_BACKEND_EXCHANGE=${oktaConfigState.useBackendExchange || false}\n\n`;
+    content += `VITE_OKTA_REDIRECT_URI=${oktaConfigState.redirectUri}\n\n`;
 
     content += `# --- Migration Settings ---\n`;
     content += `VITE_MIGRATE_AGENTS=${shouldMigrateAgents}\n`;
@@ -786,10 +782,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
               poolId: config.VITE_OKTA_POOL_ID || '',
               providerId: config.VITE_OKTA_PROVIDER_ID || '',
               clientId: config.VITE_OKTA_CLIENT_ID || '',
-              clientSecret: config.VITE_OKTA_CLIENT_SECRET || '',
               authEndpoint: config.VITE_OKTA_AUTH_ENDPOINT || '',
               redirectUri: config.VITE_OKTA_REDIRECT_URI || '',
-              useBackendExchange: config.VITE_OKTA_USE_BACKEND_EXCHANGE === 'true',
             });
           }
 
@@ -4470,22 +4464,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                     <label className="block text-xs text-gray-500 dark:text-white mb-1">Client ID</label>
                     <input type="text" value={oktaConfigState.clientId} onChange={(e) => setOktaConfigState({...oktaConfigState, clientId: e.target.value})} className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" />
                   </div>
-                  <div>
-                    <label className="block text-xs text-gray-500 dark:text-white mb-1">Client Secret (Optional for SPA)</label>
-                    <input type="password" placeholder="••••••••" value={oktaConfigState.clientSecret || ''} onChange={(e) => setOktaConfigState({...oktaConfigState, clientSecret: e.target.value})} className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" />
-                  </div>
-                  <div className="flex items-center gap-2 pt-4 col-span-2">
-                    <input 
-                      type="checkbox" 
-                      id="pageOktaUseBackendExchange" 
-                      checked={!!oktaConfigState.useBackendExchange} 
-                      onChange={(e) => setOktaConfigState({...oktaConfigState, useBackendExchange: e.target.checked})}
-                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                    />
-                    <label htmlFor="pageOktaUseBackendExchange" className="text-xs font-semibold text-gray-700 dark:text-white cursor-pointer">
-                      Use Backend Exchange (Web Application)
-                    </label>
-                  </div>
+
                   <div className="col-span-2">
                     <label className="block text-xs text-gray-500 dark:text-white mb-1">Auth Endpoint</label>
                     <input type="text" value={oktaConfigState.authEndpoint} onChange={(e) => setOktaConfigState({...oktaConfigState, authEndpoint: e.target.value})} className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" />

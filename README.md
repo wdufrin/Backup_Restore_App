@@ -134,12 +134,55 @@ gcloud iam roles create customBackupViewer \
     --stage=GA
 ```
 
-Bind the role to your migrating workforce principal/group:
-```bash
-gcloud projects add-iam-policy-binding "YOUR_PROJECT_ID" \
-    --member="principalSet://iam.googleapis.com/locations/global/workforcePools/YOUR_POOL/group/YOUR_GROUP_ID" \
-    --role="projects/YOUR_PROJECT_ID/roles/customBackupViewer"
-```
+### Google Cloud Workforce Identity Federation (WIF) Setup
+To allow users from Okta or Entra ID to authenticate directly with Google Cloud APIs from their browser, you must set up a Workforce Identity Pool and OIDC Provider:
+
+1. **Create a Workforce Pool**:
+   ```bash
+   gcloud iam workforce-pools create YOUR_POOL_ID \
+       --location="global" \
+       --description="Workforce Pool for migration administrators" \
+       --display-name="Migration Workforce Pool"
+   ```
+
+2. **Configure an OIDC Provider**:
+   * **For Microsoft Entra ID**:
+     ```bash
+     gcloud iam workforce-pools providers create-oidc YOUR_PROVIDER_ID \
+         --workforce-pool="YOUR_POOL_ID" \
+         --location="global" \
+         --issuer-uri="https://login.microsoftonline.com/YOUR_TENANT_ID/v2.0" \
+         --client-id="YOUR_ENTRA_APP_CLIENT_ID" \
+         --attribute-mapping="google.subject=assertion.sub,google.groups=assertion.groups,google.display_name=assertion.name" \
+         --description="Entra ID Provider" \
+         --display-name="Entra ID"
+     ```
+   * **For Okta**:
+     ```bash
+     gcloud iam workforce-pools providers create-oidc YOUR_PROVIDER_ID \
+         --workforce-pool="YOUR_POOL_ID" \
+         --location="global" \
+         --issuer-uri="https://YOUR_OKTA_DOMAIN.okta.com" \
+         --client-id="YOUR_OKTA_APP_CLIENT_ID" \
+         --attribute-mapping="google.subject=assertion.sub,google.groups=assertion.groups,google.display_name=assertion.name" \
+         --description="Okta Provider" \
+         --display-name="Okta"
+     ```
+     *Note:* If using Okta's default or a custom Authorization Server, append the server path to the issuer URI (e.g. `https://YOUR_OKTA_DOMAIN.okta.com/oauth2/default`).
+
+   > [!IMPORTANT]
+   > **Pool Reuse and SPA Flow Constraints**:
+   > *   **Microsoft Entra ID (Azure AD)**: If you already have an existing Workforce Pool and OIDC Provider configured for Entra ID, you can reuse the **same pool and provider** without recreating them. Just ensure that the redirect URIs under the SPA platform are enabled in your Entra ID App registration.
+   > *   **Okta**: For Okta integrations running client-side, a **new workforce pool and provider must be created specifically for the SPA**.
+   > *   **ID Token Exchange (No Secrets)**: Because Single-Page Applications (SPAs) run entirely in the browser, they cannot securely hold a Client Secret. The WIF provider must be configured as a public client (omit the `--client-secret` flag when creating the provider). Under this flow, the client retrieves the OIDC **ID Token** directly from Okta/Entra ID and exchanges it with the Google Security Token Service (STS), rather than performing an authorization code exchange.
+
+3. **Bind IAM Policy**:
+   Bind the Custom Viewer role to a specific AD group or Okta group mapped in your pool:
+   ```bash
+   gcloud projects add-iam-policy-binding "YOUR_PROJECT_ID" \
+       --member="principalSet://iam.googleapis.com/locations/global/workforcePools/YOUR_POOL_ID/group/YOUR_AD_OR_OKTA_GROUP_NAME" \
+       --role="projects/YOUR_PROJECT_ID/roles/customBackupViewer"
+   ```
 
 ### Identity Provider App Registration (Azure AD / Entra ID)
 To enable browser-based login with PKCE, the application registration must be configured as a **Single-Page Application (SPA)**:
@@ -150,6 +193,19 @@ To enable browser-based login with PKCE, the application registration must be co
 5.  Set your Redirect URIs (e.g. `http://localhost:5173` for development, `https://backup.ge-dufrin.com` for production).
 6.  *Crucial:* If these URIs were previously configured under "Web" or "Implicit Grant", delete them there first. Entra ID does not allow overlapping redirects across Web and SPA platforms.
 7.  Save changes.
+
+### Identity Provider App Registration (Okta)
+To enable Okta login with PKCE, the app integration must be configured as a **Single-Page Application (SPA)**:
+1.  Log in to your Okta Admin Console.
+2.  Navigate to **Applications** -> **Applications** and click **Create App Integration**.
+3.  Select **OIDC - OpenID Connect** as the Sign-in method, and select **Single-Page Application (SPA)** as the Application type. Click **Next**.
+4.  Set the **App integration name** (e.g., `Gemini Enterprise Backup & Restore`).
+5.  Under **Grant type**, ensure **Authorization Code** is checked.
+6.  Set the **Sign-in redirect URIs** (e.g. `http://localhost:5173` for development, or the production URL `https://your-cloud-run-url.run.app/`).
+7.  Under **Assignments**, select the groups or users who should access the app.
+8.  Click **Save**.
+9.  In the **General** tab of your new app integration, copy the **Client ID** (this maps to `VITE_OKTA_CLIENT_ID`).
+10. Determine your **Auth Endpoint**. For the default Okta authorization server, this is usually `https://<okta-tenant-name>.okta.com/oauth2/default/v1/authorize`. For custom authorization servers or custom domains, adjust the domain and path accordingly (e.g., `https://googlenasc.okta.com/oauth2/v1/authorize`).
 
 ---
 
@@ -270,8 +326,6 @@ When Admin Mode is enabled, a settings gear button is displayed on the login scr
     *   **Pool ID**: The Okta WIF workforce pool ID.
     *   **Provider ID**: The Okta WIF provider ID.
     *   **Client ID**: The Client ID of your Okta application.
-    *   **Client Secret (Optional for SPA)**: Required only if using confidential Web Application mode. Leave empty if using Secret Manager or SPA mode.
-    *   **Use Backend Exchange (Web Application)**: Check this box if your Okta app is registered as a **Web Application**. This delegates OIDC token exchange to the backend (allowing server-side secrets from Secret Manager). Leave unchecked if using a standard **Single-Page Application (SPA)** flow.
     *   **Auth Endpoint**: Okta tenant authorization endpoint.
     *   **Redirect URI**: Your Okta redirect URI.
 *   **Save & Reset**: Click **Save** to write settings to the browser's `localStorage` or **Reset** to restore default values.
@@ -319,34 +373,4 @@ If deploying via a Cloud Build git-trigger, you should configure these variables
    * Key: `_ALLOWED_EMAIL_DOMAIN` / Value: `<your-org-domain>` (optional)
 4. Save the changes.
 
----
 
-### Managing Secrets with Secret Manager (Production Setup)
-
-For secure corporate deployments, the **Okta Client Secret** must not be exposed as plain text in configuration files or triggers. Instead, provision it inside **GCP Secret Manager** and mount it directly to Cloud Run at runtime:
-
-1. **Create the Secret**:
-   Create a secret resource in GCP Secret Manager:
-   ```bash
-   gcloud secrets create okta-client-secret --replication-policy="automatic"
-   ```
-
-2. **Add the Secret Value**:
-   Upload your Okta Client Secret as version `1`:
-   ```bash
-   echo -n "YOUR_OKTA_CLIENT_SECRET" | gcloud secrets versions add okta-client-secret --data-file=-
-   ```
-
-3. **Grant Secret Accessor IAM Role**:
-   Authorize your Cloud Run service account (e.g. `PROJECT_NUMBER-compute@developer.gserviceaccount.com`) to read this secret:
-   ```bash
-   gcloud secrets add-iam-policy-binding okta-client-secret \
-       --member="serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
-       --role="roles/secretmanager.secretAccessor"
-   ```
-
-4. **Bind the Secret to Cloud Run**:
-   In your `cloudbuild.yaml` deployment step or during manual `gcloud run deploy`, append the `--update-secrets` flag to mount the secret as an environment variable:
-   ```bash
-   --update-secrets=OKTA_CLIENT_SECRET=okta-client-secret:latest
-   ```
