@@ -461,92 +461,34 @@ function App() {
       );
     }
     
-    // Check if the current IDP selection is WIF-based (either 'WiF' or 'Okta')
-    const isWifRelated = idp === 'WiF' || idp === 'Okta';
-    
-    if (isWifRelated) {
-      const isWifActive = enableWifIdp;
-      const isOktaActive = enableOktaIdp;
-      
-      if (isWifActive && isOktaActive) {
-        return (
-          <div key={`wif-group-${role}`} className="flex gap-2">
-            <button 
-              onClick={async () => {
-                if (role === 'source') {
-                  setSourceIdp('WiF');
-                  localStorage.setItem('agentspace-sourceIdp', 'WiF');
-                } else {
-                  setTargetIdp('WiF');
-                  localStorage.setItem('agentspace-targetIdp', 'WiF');
-                }
-                await handleWifSignIn(role);
-              }}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
-            >
-              {isIdpChangeEnabled ? `Sign In to ${role === 'source' ? 'Source' : 'Target'} (EntraID)` : 'Sign In with EntraID'}
-            </button>
-            <button 
-              onClick={async () => {
-                if (role === 'source') {
-                  setSourceIdp('Okta');
-                  localStorage.setItem('agentspace-sourceIdp', 'Okta');
-                } else {
-                  setTargetIdp('Okta');
-                  localStorage.setItem('agentspace-targetIdp', 'Okta');
-                }
-                await handleOktaSignIn(role);
-              }}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
-            >
-              {isIdpChangeEnabled ? `Sign In to ${role === 'source' ? 'Source' : 'Target'} (OKTA WIF)` : 'Sign In with OKTA WIF'}
-            </button>
-          </div>
-        );
-      }
-      
-      if (isWifActive && !isOktaActive) {
-        return (
-          <button 
-            key={`wif-${role}`}
-            onClick={async () => {
-              if (role === 'source') {
-                setSourceIdp('WiF');
-                localStorage.setItem('agentspace-sourceIdp', 'WiF');
-              } else {
-                setTargetIdp('WiF');
-                localStorage.setItem('agentspace-targetIdp', 'WiF');
-              }
-              await handleWifSignIn(role);
-            }} 
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
-          >
-            {isIdpChangeEnabled ? `Sign In to ${role === 'source' ? 'Source' : 'Target'} (WiF)` : 'Sign In with WiF'}
-          </button>
-        );
-      }
-      
-      if (!isWifActive && isOktaActive) {
-        return (
-          <button 
-            key={`okta-${role}`}
-            onClick={async () => {
-              if (role === 'source') {
-                setSourceIdp('Okta');
-                localStorage.setItem('agentspace-sourceIdp', 'Okta');
-              } else {
-                setTargetIdp('Okta');
-                localStorage.setItem('agentspace-targetIdp', 'Okta');
-              }
-              await handleOktaSignIn(role);
-            }} 
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
-          >
-            {isIdpChangeEnabled ? `Sign In to ${role === 'source' ? 'Source' : 'Target'} (WiF)` : 'Sign In with WiF'}
-          </button>
-        );
-      }
+    if (idp === 'WiF' && enableWifIdp) {
+      return (
+        <button 
+          key={`wif-${role}`}
+          onClick={async () => {
+            await handleWifSignIn(role);
+          }} 
+          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
+        >
+          {isIdpChangeEnabled ? `Sign In to ${role === 'source' ? 'Source' : 'Target'} (EntraID)` : 'Sign In with EntraID'}
+        </button>
+      );
     }
+    
+    if (idp === 'Okta' && enableOktaIdp) {
+      return (
+        <button 
+          key={`okta-${role}`}
+          onClick={async () => {
+            await handleOktaSignIn(role);
+          }} 
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
+        >
+          {isIdpChangeEnabled ? `Sign In to ${role === 'source' ? 'Source' : 'Target'} (OKTA WIF)` : 'Sign In with OKTA WIF'}
+        </button>
+      );
+    }
+    
     return null;
   };
 
