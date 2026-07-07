@@ -456,7 +456,9 @@ function App() {
           onClick={handleGoogleSignIn} 
           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
         >
-          {isIdpChangeEnabled ? `Sign In to ${role === 'source' ? 'Source' : 'Target'} (Google)` : 'Sign In with Google'}
+          {isAdminModeEnabled 
+            ? (isIdpChangeEnabled ? `Sign In to ${role === 'source' ? 'Source' : 'Target'} (Google)` : 'Sign In with Google') 
+            : 'Log In'}
         </button>
       );
     }
@@ -470,7 +472,9 @@ function App() {
           }} 
           className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
         >
-          {isIdpChangeEnabled ? `Sign In to ${role === 'source' ? 'Source' : 'Target'} (EntraID)` : 'Sign In with EntraID'}
+          {isAdminModeEnabled 
+            ? (isIdpChangeEnabled ? `Sign In to ${role === 'source' ? 'Source' : 'Target'} (EntraID)` : 'Sign In with EntraID') 
+            : 'Log In'}
         </button>
       );
     }
@@ -484,7 +488,9 @@ function App() {
           }} 
           className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-md text-sm font-semibold text-white transition-colors shadow-sm"
         >
-          {isIdpChangeEnabled ? `Sign In to ${role === 'source' ? 'Source' : 'Target'} (OKTA WIF)` : 'Sign In with OKTA WIF'}
+          {isAdminModeEnabled 
+            ? (isIdpChangeEnabled ? `Sign In to ${role === 'source' ? 'Source' : 'Target'} (OKTA WIF)` : 'Sign In with OKTA WIF') 
+            : 'Log In'}
         </button>
       );
     }
@@ -581,7 +587,7 @@ function App() {
               <p className="text-gray-600 mb-4">Please sign in to access backup and restore functions.</p>
               <div className="flex gap-2 items-center">
                 {renderLoginButton('source')}
-                {sourceIdp !== targetIdp && renderLoginButton('target')}
+                {isAdminModeEnabled && sourceIdp !== targetIdp && renderLoginButton('target')}
                 {isAdminModeEnabled && (
                   <button 
                     onClick={() => {
