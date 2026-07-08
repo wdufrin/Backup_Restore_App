@@ -418,7 +418,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
       targetAppId: import.meta.env.VITE_TARGET_APP_ID || '',
       targetAppUrl: import.meta.env.VITE_TARGET_APP_URL || '',
       bypassOwnerFilter: import.meta.env.VITE_BYPASS_OWNER_FILTER === 'true',
-      enableAgentViewFallback: true, // Default to true
+      enableAgentViewFallback: import.meta.env.VITE_ENABLE_AGENT_VIEW_FALLBACK !== 'false', // Default to true
       forceDownloadBackup: import.meta.env.VITE_FORCE_DOWNLOAD_BACKUP === 'true',
     };
   });
@@ -487,6 +487,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
       VITE_TARGET_APP_URL: runtime.VITE_TARGET_APP_URL || import.meta.env.VITE_TARGET_APP_URL,
       VITE_BYPASS_OWNER_FILTER: runtime.VITE_BYPASS_OWNER_FILTER !== undefined ? runtime.VITE_BYPASS_OWNER_FILTER : import.meta.env.VITE_BYPASS_OWNER_FILTER,
       VITE_FORCE_DOWNLOAD_BACKUP: runtime.VITE_FORCE_DOWNLOAD_BACKUP !== undefined ? runtime.VITE_FORCE_DOWNLOAD_BACKUP : import.meta.env.VITE_FORCE_DOWNLOAD_BACKUP,
+      VITE_ENABLE_AGENT_VIEW_FALLBACK: runtime.VITE_ENABLE_AGENT_VIEW_FALLBACK !== undefined ? runtime.VITE_ENABLE_AGENT_VIEW_FALLBACK : import.meta.env.VITE_ENABLE_AGENT_VIEW_FALLBACK,
       VITE_DATASTORE_MAPPING: runtime.VITE_DATASTORE_MAPPING || import.meta.env.VITE_DATASTORE_MAPPING,
       VITE_COLLECTION_MAPPING: runtime.VITE_COLLECTION_MAPPING || import.meta.env.VITE_COLLECTION_MAPPING,
     };
@@ -501,7 +502,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
         targetAppId: base.VITE_TARGET_APP_ID || '',
         targetAppUrl: base.VITE_TARGET_APP_URL || '',
         bypassOwnerFilter: base.VITE_BYPASS_OWNER_FILTER === 'true',
-        enableAgentViewFallback: true,
+        enableAgentViewFallback: base.VITE_ENABLE_AGENT_VIEW_FALLBACK !== 'false',
         forceDownloadBackup: base.VITE_FORCE_DOWNLOAD_BACKUP === 'true',
       });
     }
