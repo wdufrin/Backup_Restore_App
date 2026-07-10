@@ -15,7 +15,7 @@
  */
 
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import type { Agent, AppEngine, Authorization, Config, ReasoningEngine, GcsBucket, Collection, DataStore } from './types';
 import * as api from './services/apiService';
 import RestoreSelectionModal from './components/backup/RestoreSelectionModal';
@@ -45,6 +45,24 @@ const getLogLevel = (message: string): LogLevel => {
     return 'ERROR';
   }
   return 'INFO';
+};
+
+const extractCidFromEngine = (engine: any): string | null => {
+  if (!engine) return null;
+  
+  if (engine.widgetConfigConfigId) {
+    return engine.widgetConfigConfigId;
+  }
+  
+  const defaultUri = engine.chatEngineConfig?.dialogflowAgentToStoreRouting?.defaultUri;
+  if (defaultUri) {
+    const match = defaultUri.split('cid/');
+    if (match.length > 1) {
+      return match[1].replace(/\/$/, '');
+    }
+  }
+  
+  return null;
 };
 
 
@@ -402,6 +420,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
     targetLocation: string;
     targetAppId: string;
     targetAppUrl: string;
+    targetCid?: string;
     bypassOwnerFilter?: boolean;
     enableAgentViewFallback?: boolean;
     forceDownloadBackup?: boolean;
@@ -417,6 +436,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
       targetLocation: import.meta.env.VITE_TARGET_LOCATION || 'global',
       targetAppId: import.meta.env.VITE_TARGET_APP_ID || '',
       targetAppUrl: import.meta.env.VITE_TARGET_APP_URL || '',
+      targetCid: import.meta.env.VITE_TARGET_CID || '',
       bypassOwnerFilter: import.meta.env.VITE_BYPASS_OWNER_FILTER === 'true',
       enableAgentViewFallback: import.meta.env.VITE_ENABLE_AGENT_VIEW_FALLBACK !== 'false', // Default to true
       forceDownloadBackup: import.meta.env.VITE_FORCE_DOWNLOAD_BACKUP === 'true',
@@ -485,6 +505,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
       VITE_TARGET_LOCATION: runtime.VITE_TARGET_LOCATION || import.meta.env.VITE_TARGET_LOCATION,
       VITE_TARGET_APP_ID: runtime.VITE_TARGET_APP_ID || import.meta.env.VITE_TARGET_APP_ID,
       VITE_TARGET_APP_URL: runtime.VITE_TARGET_APP_URL || import.meta.env.VITE_TARGET_APP_URL,
+      VITE_TARGET_CID: runtime.VITE_TARGET_CID || import.meta.env.VITE_TARGET_CID,
       VITE_BYPASS_OWNER_FILTER: runtime.VITE_BYPASS_OWNER_FILTER !== undefined ? runtime.VITE_BYPASS_OWNER_FILTER : import.meta.env.VITE_BYPASS_OWNER_FILTER,
       VITE_FORCE_DOWNLOAD_BACKUP: runtime.VITE_FORCE_DOWNLOAD_BACKUP !== undefined ? runtime.VITE_FORCE_DOWNLOAD_BACKUP : import.meta.env.VITE_FORCE_DOWNLOAD_BACKUP,
       VITE_ENABLE_AGENT_VIEW_FALLBACK: runtime.VITE_ENABLE_AGENT_VIEW_FALLBACK !== undefined ? runtime.VITE_ENABLE_AGENT_VIEW_FALLBACK : import.meta.env.VITE_ENABLE_AGENT_VIEW_FALLBACK,
@@ -501,6 +522,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
         targetLocation: base.VITE_TARGET_LOCATION || 'global',
         targetAppId: base.VITE_TARGET_APP_ID || '',
         targetAppUrl: base.VITE_TARGET_APP_URL || '',
+        targetCid: base.VITE_TARGET_CID || '',
         bypassOwnerFilter: base.VITE_BYPASS_OWNER_FILTER === 'true',
         enableAgentViewFallback: base.VITE_ENABLE_AGENT_VIEW_FALLBACK !== 'false',
         forceDownloadBackup: base.VITE_FORCE_DOWNLOAD_BACKUP === 'true',
@@ -525,6 +547,82 @@ const BackupPage: React.FC<BackupPageProps> = ({
       }
     }
   }, [runtimeConfig]);
+
+  const lastGeneratedUrlRef = useRef(
+    userTabConfig.targetCid 
+      ? `https://vertexaisearch.cloud.google.com/home/cid/${userTabConfig.targetCid}` 
+      : ''
+  );
+
+  // Auto-generate URL from CID
+  useEffect(() => {
+    const { targetCid, targetAppUrl } = userTabConfig;
+    if (targetCid) {
+      const generatedUrl = `https://vertexaisearch.cloud.google.com/home/cid/${targetCid}`;
+      if (targetAppUrl !== generatedUrl && (!targetAppUrl || targetAppUrl === lastGeneratedUrlRef.current)) {
+        lastGeneratedUrlRef.current = generatedUrl;
+        setUserTabConfig(prev => ({ ...prev, targetAppUrl: generatedUrl }));
+      }
+    }
+  }, [userTabConfig.targetCid]);
+
+  // Extract CID from URL if pasted/modified manually
+  useEffect(() => {
+    const { targetAppUrl, targetCid } = userTabConfig;
+    if (targetAppUrl) {
+      const match = targetAppUrl.match(/\/home\/cid\/([a-zA-Z0-9-]+)/);
+      if (match && match[1]) {
+        const extractedCid = match[1];
+        if (extractedCid !== targetCid) {
+          addLog(`[CID Extraction] Extracted CID ${extractedCid} from target URL.`);
+          setUserTabConfig(prev => ({ ...prev, targetCid: extractedCid }));
+        }
+      }
+    }
+  }, [userTabConfig.targetAppUrl]);
+
+  // Resolve CID from selected App ID using getEngine API details
+  useEffect(() => {
+    const { targetProject, targetLocation, targetAppId, targetCid } = userTabConfig;
+    if (targetProject && targetLocation && targetAppId) {
+      const app = targetApps.find(a => a.name.split('/').pop() === targetAppId);
+      
+      const processApp = (appDetails: any) => {
+        const extractedCid = extractCidFromEngine(appDetails);
+        addLog(`[CID Resolution] Extracted CID: ${extractedCid || 'none'} for app ${targetAppId}`);
+        if (extractedCid && extractedCid !== targetCid) {
+          setUserTabConfig(prev => ({
+            ...prev,
+            targetCid: extractedCid,
+          }));
+        }
+      };
+
+      if (app) {
+        const cid = extractCidFromEngine(app);
+        if (cid) {
+          addLog(`[CID Resolution] Found CID ${cid} in list cache for ${targetAppId}`);
+          processApp(app);
+        } else {
+          addLog(`[CID Resolution] Fetching engine details for ${targetAppId} to resolve CID...`);
+          api.getEngine(targetAppId, {
+            projectId: targetProject,
+            appLocation: targetLocation,
+            collectionId: 'default_collection',
+            accessToken: targetToken || accessToken,
+            appId: targetAppId,
+            assistantId: 'default_assistant'
+          }).then(fullApp => {
+            addLog(`[CID Resolution] Engine details fetched successfully.`);
+            setTargetApps(prev => prev.map(a => a.name === fullApp.name ? fullApp : a));
+            processApp(fullApp);
+          }).catch(err => {
+            addLog(`[CID Resolution] Failed to fetch engine details: ${err.message}`);
+          });
+        }
+      }
+    }
+  }, [userTabConfig.targetAppId, userTabConfig.targetProject, userTabConfig.targetLocation, targetApps]);
 
   useEffect(() => {
     localStorage.setItem('agentspace-step1Complete', String(isStep1Complete));
@@ -649,6 +747,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
     content += `VITE_TARGET_LOCATION=${userTabConfig.targetLocation}\n`;
     content += `VITE_TARGET_APP_ID=${userTabConfig.targetAppId}\n`;
     content += `VITE_TARGET_APP_URL=${userTabConfig.targetAppUrl}\n`;
+    content += `VITE_TARGET_CID=${userTabConfig.targetCid || ''}\n`;
     
     const targetIdpVal = targetIdp;
     if (sourceIdpVal !== targetIdpVal) {
@@ -753,6 +852,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
             targetLocation: config.VITE_TARGET_LOCATION || 'global',
             targetAppId: config.VITE_TARGET_APP_ID || '',
             targetAppUrl: config.VITE_TARGET_APP_URL || '',
+            targetCid: config.VITE_TARGET_CID || '',
             bypassOwnerFilter: config.VITE_BYPASS_OWNER_FILTER === 'true',
             enableAgentViewFallback: config.VITE_ENABLE_AGENT_VIEW_FALLBACK !== 'false', // Default to true if missing/not set to false
             forceDownloadBackup: config.VITE_FORCE_DOWNLOAD_BACKUP === 'true',
@@ -874,6 +974,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
       targetLocation: base.VITE_TARGET_LOCATION || 'global',
       targetAppId: base.VITE_TARGET_APP_ID || '',
       targetAppUrl: base.VITE_TARGET_APP_URL || '',
+      targetCid: base.VITE_TARGET_CID || '',
     });
     setFeatureFlags({
       idpChangeEnabled: base.VITE_IDP_CHANGE_ENABLED === 'true',
@@ -4323,15 +4424,54 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                   </button>
                 </div>
               </div>
-              <div className="mt-3">
-                <label className="block text-xs text-gray-500 dark:text-white mb-1">Target GE App URL (Optional - for direct link in Step 1)</label>
-                <input 
-                  type="text" 
-                  value={userTabConfig.targetAppUrl} 
-                  onChange={(e) => setUserTabConfig(prev => ({ ...prev, targetAppUrl: e.target.value }))} 
-                  className="bg-white border border-gray-300 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500" 
-                  placeholder="Enter full URL (e.g., https://vertexaisearch.cloud.google.com/home/cid/...)" 
-                />
+              <div className="mt-3 grid grid-cols-3 gap-4 items-end">
+                <div className="col-span-1">
+                  <label className="block text-xs text-gray-500 dark:text-white mb-1">Target Customer ID (CID) (Optional)</label>
+                  <input 
+                    type="text" 
+                    value={userTabConfig.targetCid || ''} 
+                    onChange={(e) => setUserTabConfig(prev => ({ ...prev, targetCid: e.target.value }))} 
+                    className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" 
+                    placeholder="e.g., c90049eb-e985-42a7-b2ba-ef728d32e4ba" 
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs text-gray-500 dark:text-white mb-1">Target GE App URL (Optional - for direct link in Step 1)</label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="text" 
+                      value={userTabConfig.targetAppUrl} 
+                      onChange={(e) => setUserTabConfig(prev => ({ ...prev, targetAppUrl: e.target.value }))} 
+                      className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm flex-grow focus:ring-blue-500 focus:border-blue-500 dark:text-white" 
+                      placeholder="Enter full URL (e.g., https://vertexaisearch.cloud.google.com/home/cid/...)" 
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (userTabConfig.targetCid) {
+                          const generatedUrl = `https://vertexaisearch.cloud.google.com/home/cid/${userTabConfig.targetCid}`;
+                          setUserTabConfig(prev => ({ ...prev, targetAppUrl: generatedUrl }));
+                        }
+                      }}
+                      disabled={!userTabConfig.targetCid}
+                      className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                    >
+                      Generate
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (userTabConfig.targetAppUrl) {
+                          window.open(userTabConfig.targetAppUrl, '_blank', 'noopener,noreferrer');
+                        }
+                      }}
+                      disabled={!userTabConfig.targetAppUrl}
+                      className="px-3 py-2 bg-gray-600 hover:bg-gray-700 text-white text-xs font-semibold rounded-lg shadow-sm disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                    >
+                      Test Link
+                    </button>
+                  </div>
+                </div>
               </div>
               {targetDatastores.length > 0 && (
                 <div className="mt-3 text-xs text-gray-600 dark:text-white">
