@@ -1516,7 +1516,7 @@ serviceusage.services.use" \\
 Step 2: Assign the role to your user (Dynamic based on your login):
 
 gcloud projects add-iam-policy-binding ${targetProject} \\
-    --member="principal://iam.googleapis.com/locations/global/workforcePools/${poolId || 'YOUR_POOL_ID'}/subject/${userEmail}" \\
+    --member="principal://iam.googleapis.com/locations/global/workforcePools/${poolId || 'YOUR_POOL_ID'}/subject/${userSub || userEmail}" \\
     --role="projects/${targetProject}/roles/customBackupViewer"
 
 Alternatively, assign to your group if you prefer group-based access control:

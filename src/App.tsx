@@ -533,11 +533,11 @@ function App() {
           {accessToken ? (
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 bg-pink-600 rounded-full flex items-center justify-center text-white font-bold shadow-sm">
-                {userProfile?.name?.[0] || 'W'}
+                {userProfile?.name?.[0] || 'A'}
               </div>
               <div className="flex flex-col text-left">
-                <span className="text-sm font-semibold text-gray-900">{userProfile?.name || 'William Dufrin'}</span>
-                <span className="text-xs text-gray-500">{userProfile?.email || 'admin@wdufrin.altostrat.com'}</span>
+                <span className="text-sm font-semibold text-gray-900">{userProfile?.name || 'Administrator'}</span>
+                <span className="text-xs text-gray-500">{userProfile?.email || 'admin@domain.com'}</span>
               </div>
               <button onClick={handleSignOut} className="ml-2 text-xs text-red-400 hover:text-red-300 font-medium">Sign Out</button>
             </div>

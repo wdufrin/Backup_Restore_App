@@ -79,39 +79,61 @@ const resolveQuotaProject = (projectId?: string, requestHeaders?: any, accessTok
         if (!requestToken) {
             requestToken = sourceToken || defaultToken || undefined;
         }
+
+        console.log("[DEBUG QUOTA] resolveQuotaProject inputs:", {
+            projectId,
+            sourceIdp,
+            targetIdp,
+            hasSourceToken: !!sourceToken,
+            hasTargetToken: !!targetToken,
+            hasDefaultToken: !!defaultToken,
+            hasRequestToken: !!requestToken,
+            requestTokenMatchesSource: requestToken === sourceToken,
+            requestTokenMatchesTarget: requestToken === targetToken,
+            requestTokenMatchesDefault: requestToken === defaultToken,
+        });
         
         const getWifUserProject = (idp: string): string | undefined => {
+            console.log("[DEBUG QUOTA] getWifUserProject for IDP:", idp);
             if (idp === 'WiF' || idp === 'Okta') {
                 const configKey = idp === 'WiF' ? 'agentspace-wifConfig' : 'agentspace-oktaConfig';
                 const configStr = localStorage.getItem(configKey);
+                console.log(`[DEBUG QUOTA] Config key ${configKey} exists:`, !!configStr);
                 if (configStr) {
                     const parsed = JSON.parse(configStr);
+                    console.log(`[DEBUG QUOTA] Config userProject:`, parsed.userProject);
                     if (parsed.userProject) return parsed.userProject;
                 }
                 
                 const fallbackKey = idp === 'WiF' ? 'agentspace-oktaConfig' : 'agentspace-wifConfig';
                 const fallbackStr = localStorage.getItem(fallbackKey);
+                console.log(`[DEBUG QUOTA] Fallback key ${fallbackKey} exists:`, !!fallbackStr);
                 if (fallbackStr) {
                     const parsed = JSON.parse(fallbackStr);
+                    console.log(`[DEBUG QUOTA] Fallback userProject:`, parsed.userProject);
                     if (parsed.userProject) return parsed.userProject;
                 }
             }
             return undefined;
         };
 
+        let resolved = projectId;
         if (sourceToken && targetToken) {
             if (requestToken === sourceToken) {
                 const wifProject = getWifUserProject(sourceIdp);
-                if (wifProject) return wifProject;
+                if (wifProject) resolved = wifProject;
             } else if (requestToken === targetToken) {
                 const wifProject = getWifUserProject(targetIdp);
-                if (wifProject) return wifProject;
+                if (wifProject) resolved = wifProject;
             }
+        } else {
+            const activeIdp = (requestToken === targetToken) ? targetIdp : sourceIdp;
+            const wifProject = getWifUserProject(activeIdp);
+            if (wifProject) resolved = wifProject;
         }
         
-        const activeIdp = (requestToken === targetToken) ? targetIdp : sourceIdp;
-        const wifProject = getWifUserProject(activeIdp);
-        if (wifProject) return wifProject;
+        console.log("[DEBUG QUOTA] resolveQuotaProject output:", resolved);
+        return resolved;
         
     } catch (e) {
         console.warn("Failed to resolve WIF user project for quota headers:", e);
