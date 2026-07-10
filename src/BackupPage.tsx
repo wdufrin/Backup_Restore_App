@@ -1486,16 +1486,30 @@ Step 1: Create the custom role:
 gcloud iam roles create customBackupViewer \\
     --project=${targetProject} \\
     --title="Discovery Engine Custom Backup Viewer" \\
-    --permissions="discoveryengine.engines.list,\\
+    --permissions="discoveryengine.collections.list,\\
+discoveryengine.engines.list,\\
 discoveryengine.engines.get,\\
 discoveryengine.assistants.list,\\
 discoveryengine.assistants.get,\\
 discoveryengine.agents.list,\\
 discoveryengine.agents.get,\\
-discoveryengine.agents.manage,\\
+discoveryengine.agents.getAgentView,\\
 discoveryengine.agents.getIamPolicy,\\
+discoveryengine.agents.create,\\
+discoveryengine.agents.update,\\
+discoveryengine.agents.setIamPolicy,\\
+discoveryengine.agents.manage,\\
+discoveryengine.dataStores.list,\\
+discoveryengine.dataConnectors.get,\\
 discoveryengine.notebooks.list,\\
 discoveryengine.notebooks.get,\\
+discoveryengine.notebooks.create,\\
+aiplatform.reasoningEngines.list,\\
+storage.buckets.list,\\
+storage.objects.list,\\
+storage.objects.get,\\
+storage.objects.create,\\
+storage.objects.delete,\\
 serviceusage.services.use" \\
     --stage=GA
 
@@ -4191,7 +4205,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
               </svg>
               Import Config
-              <input type="file" accept=".json" onChange={importAdminConfig} className="hidden" />
+              <input type="file" accept=".json,.env,.exported,.env.exported,text/plain" onChange={importAdminConfig} className="hidden" />
             </label>
           </div>
           <div className="space-y-6">

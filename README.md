@@ -115,22 +115,18 @@ graph LR
 ### Minimum IAM Permissions
 To execute migrations without requiring project Owner credentials, assign a custom role in **both** source and target projects containing the following permissions:
 
-*   `discoveryengine.engines.list` & `discoveryengine.engines.get`
-*   `discoveryengine.assistants.list` & `discoveryengine.assistants.get`
-*   `discoveryengine.agents.list` & `discoveryengine.agents.get`
-*   `discoveryengine.agents.getAgentView` & `discoveryengine.agents.getIamPolicy`
-*   `discoveryengine.agents.create` & `discoveryengine.agents.update`
-*   `discoveryengine.agents.deploy` & `discoveryengine.agents.manage`
-*   `discoveryengine.notebooks.list` & `discoveryengine.notebooks.get` & `discoveryengine.notebooks.create`
-*   `serviceusage.services.use`
+*   **Discovery Engine**: `discoveryengine.collections.list`, `discoveryengine.engines.list`, `discoveryengine.engines.get`, `discoveryengine.assistants.list`, `discoveryengine.assistants.get`, `discoveryengine.agents.list`, `discoveryengine.agents.get`, `discoveryengine.agents.getAgentView`, `discoveryengine.agents.getIamPolicy`, `discoveryengine.agents.create`, `discoveryengine.agents.update`, `discoveryengine.agents.setIamPolicy`, `discoveryengine.agents.manage`, `discoveryengine.dataStores.list`, `discoveryengine.dataConnectors.get`, `discoveryengine.notebooks.list`, `discoveryengine.notebooks.get`, `discoveryengine.notebooks.create`
+*   **AI Platform / Agent Engine**: `aiplatform.reasoningEngines.list`
+*   **Google Cloud Storage**: `storage.buckets.list`, `storage.objects.list`, `storage.objects.get`, `storage.objects.create`, `storage.objects.delete`
+*   **Service Usage**: `serviceusage.services.use`
 
 You can provision this role using the `gcloud` CLI:
 ```bash
 gcloud iam roles create customBackupViewer \
     --project="YOUR_PROJECT_ID" \
     --title="Discovery Engine Backup Viewer" \
-    --description="Least-privilege role required to migrate agents and notebooks." \
-    --permissions="discoveryengine.engines.list,discoveryengine.engines.get,discoveryengine.assistants.list,discoveryengine.assistants.get,discoveryengine.agents.list,discoveryengine.agents.get,discoveryengine.agents.getAgentView,discoveryengine.agents.getIamPolicy,discoveryengine.agents.create,discoveryengine.agents.update,discoveryengine.agents.deploy,discoveryengine.agents.manage,discoveryengine.notebooks.list,discoveryengine.notebooks.get,discoveryengine.notebooks.create,serviceusage.services.use" \
+    --description="Least-privilege role required to migrate engines, agents, notebooks, and reasoning engines." \
+    --permissions="discoveryengine.collections.list,discoveryengine.engines.list,discoveryengine.engines.get,discoveryengine.assistants.list,discoveryengine.assistants.get,discoveryengine.agents.list,discoveryengine.agents.get,discoveryengine.agents.getAgentView,discoveryengine.agents.getIamPolicy,discoveryengine.agents.create,discoveryengine.agents.update,discoveryengine.agents.setIamPolicy,discoveryengine.agents.manage,discoveryengine.dataStores.list,discoveryengine.dataConnectors.get,discoveryengine.notebooks.list,discoveryengine.notebooks.get,discoveryengine.notebooks.create,aiplatform.reasoningEngines.list,storage.buckets.list,storage.objects.list,storage.objects.get,storage.objects.create,storage.objects.delete,serviceusage.services.use" \
     --stage=GA
 ```
 
@@ -339,38 +335,26 @@ Once logged in, open the **Admin View** tab to configure mappings:
 *   **Exporting Mappings**: Click **Export Env Config** to download the completed mapping configuration as an env file (`.env.exported`).
 
 ### 4. Deploying Config Changes (Server Persistence)
-Because this application is client-driven and backend services like Cloud Run are stateless, configurations modified dynamically in the UI are kept in browser storage. To persist changes permanently across user sessions:
-1.  Customize variables or perform mapping configuration in the **Admin View**.
-2.  Click **Export Env Config** to download the generated settings.
-3.  Apply these settings back to your hosting provider (e.g. by setting Cloud Run environment variables or updating your code repository's `.env` / deployment manifests).
+Because this application runs entirely client-side, configurations modified dynamically in the UI are kept in the browser's local storage. To persist configuration defaults across user sessions:
+1. Customize variables or perform mapping configuration in the **Admin View**.
+2. Click **Export Config** to download the generated settings.
+3. Re-build the application with these environment variables (e.g. by putting them in your `.env.production` file and triggering a new build/deployment).
 
-### 5. Build-Time Defaults (.env.production) vs. Runtime Config
-The application utilizes a hybrid configuration layer to support seamless updates:
-*   **Build-time Defaults (`.env.production`)**: Git-based deployments (like Cloud Build GitHub Triggers) clone clean code where `.env` is ignored. `.env.production` is checked into the repository to bake secure public environment defaults directly into the production React bundle during compilation.
-*   **Runtime Config (`/api/config`)**: On startup, the browser queries the backend container environment variables. Any variables starting with `VITE_` configured on your Cloud Run service are dynamically fetched and merged on top of the build-time defaults.
-*   **Reset Behavior**: Clicking the **Reset** button clears local overrides and restores configuration to the active runtime variables (merged from Cloud Run environment variables and `.env.production` defaults).
+### 5. Build-Time Configuration (.env.production) & Local Storage Overrides
+The application utilizes a build-time configuration pattern:
+*   **Build-time Defaults (`.env.production`)**: Checked into the repository to bake environment configuration defaults directly into the React bundle during compilation.
+*   **Local Storage Overrides**: Dynamic overrides set by administrators in the UI (e.g., via the login settings modal or Admin View) are saved directly in the browser's `localStorage` and take precedence over build-time defaults.
+*   **Reset Behavior**: Clicking the **Reset** button clears local overrides from `localStorage` and restores the configuration to the build-time defaults baked into the React bundle.
 
 ---
 
 ## 7. Security Configurations
 
-The application includes server-side request validation (SSRF mitigation), origin validation (CORS restriction), and OAuth Token verification.
+Since this application is a static Single Page Application (SPA) running entirely in the user's browser, there is no active backend server. All API requests go directly from the client browser to Google Cloud APIs. Security, access control, and origin policies are enforced directly by Google Cloud Platform and your configured Identity Providers:
 
-### Environment Variables
-
-| Variable | Description | Default | Example |
-| :--- | :--- | :--- | :--- |
-| `ALLOWED_ORIGINS` | Comma-separated list of origins allowed to perform operations against the backend API. Must match the URL of the deployed application. | `http://localhost:5173` | `https://my-app.us-central1.run.app` |
-| `ALLOWED_EMAIL_DOMAIN` | Optional. Domain suffix to restrict access to the backup/restore APIs to users from a specific domain. | (Disabled) | `fedex.com` |
-
-### Configuring Cloud Build Triggers
-
-If deploying via a Cloud Build git-trigger, you should configure these variables using Cloud Build Substitutions:
-1. In GCP Console, go to **Cloud Build** > **Triggers**.
-2. Edit your trigger.
-3. Under **Advanced** > **Substitution variables**, add:
-   * Key: `_ALLOWED_ORIGINS` / Value: `https://<your-cloud-run-url>`
-   * Key: `_ALLOWED_EMAIL_DOMAIN` / Value: `<your-org-domain>` (optional)
-4. Save the changes.
+1.  **Google OAuth Authorized Redirect URIs**: Ensure the URL of your hosted application is added to the list of authorized redirect URIs in the Google Cloud Console (under Credentials > OAuth 2.0 Client IDs).
+2.  **Workforce Identity Federation (WIF) / OIDC Redirect URIs**: Ensure your application URL is added as a Redirect URI (configured under the Single-Page Application (SPA) platform) in Okta or Microsoft Entra ID.
+3.  **Least Privilege IAM Policies**: Secure access to Google Cloud resources by assigning minimal roles (such as the Custom Backup Viewer role) to your target workforce groups or service accounts.
+4.  **Content Security Policy (CSP)**: Nginx is configured to serve strict security headers (including `Content-Security-Policy` and `X-Frame-Options: DENY`) to mitigate Cross-Site Scripting (XSS) and Clickjacking risks. See [nginx.conf](file:///usr/local/google/home/wdufrin/Documents/Code/Backup_Restore_App/nginx.conf) for details.
 
 

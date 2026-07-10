@@ -58,6 +58,66 @@ const generateCurlCommand = (url: string, method: string, headers: any, body: an
 };
 
 // Generic gapi request wrapper
+const resolveQuotaProject = (projectId?: string, requestHeaders?: any, accessToken?: string): string | undefined => {
+    if (!projectId) return undefined;
+
+    try {
+        const sourceToken = sessionStorage.getItem('agentspace-sourceToken');
+        const targetToken = sessionStorage.getItem('agentspace-targetToken');
+        const defaultToken = sessionStorage.getItem('agentspace-accessToken');
+        
+        const sourceIdp = localStorage.getItem('agentspace-sourceIdp') || 'Google';
+        const targetIdp = localStorage.getItem('agentspace-targetIdp') || 'Google';
+        
+        let requestToken = accessToken;
+        if (!requestToken && requestHeaders && requestHeaders['Authorization']) {
+            const authHeader = requestHeaders['Authorization'];
+            if (authHeader.startsWith('Bearer ')) {
+                requestToken = authHeader.replace('Bearer ', '').trim();
+            }
+        }
+        if (!requestToken) {
+            requestToken = sourceToken || defaultToken || undefined;
+        }
+        
+        const getWifUserProject = (idp: string): string | undefined => {
+            if (idp === 'WiF') {
+                const configStr = localStorage.getItem('agentspace-wifConfig');
+                if (configStr) {
+                    const parsed = JSON.parse(configStr);
+                    return parsed.userProject;
+                }
+            } else if (idp === 'Okta') {
+                const configStr = localStorage.getItem('agentspace-oktaConfig');
+                if (configStr) {
+                    const parsed = JSON.parse(configStr);
+                    return parsed.userProject;
+                }
+            }
+            return undefined;
+        };
+
+        if (sourceToken && targetToken) {
+            if (requestToken === sourceToken) {
+                const wifProject = getWifUserProject(sourceIdp);
+                if (wifProject) return wifProject;
+            } else if (requestToken === targetToken) {
+                const wifProject = getWifUserProject(targetIdp);
+                if (wifProject) return wifProject;
+            }
+        }
+        
+        const activeIdp = (requestToken === targetToken) ? targetIdp : sourceIdp;
+        const wifProject = getWifUserProject(activeIdp);
+        if (wifProject) return wifProject;
+        
+    } catch (e) {
+        console.warn("Failed to resolve WIF user project for quota headers:", e);
+    }
+    
+    return projectId;
+};
+
 export const gapiRequest = async <T>(
     path: string, 
     method: string = 'GET', 
@@ -71,8 +131,9 @@ export const gapiRequest = async <T>(
   const client = await getGapiClient();
     const requestHeaders = headers || {};
 
-    if (projectId) {
-        requestHeaders['X-Goog-User-Project'] = projectId;
+    const quotaProject = resolveQuotaProject(projectId, requestHeaders, accessToken);
+    if (quotaProject) {
+        requestHeaders['X-Goog-User-Project'] = quotaProject;
     }
 
     // Only populate Authorization header if not already explicitly provided in headers
