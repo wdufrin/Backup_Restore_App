@@ -81,17 +81,19 @@ const resolveQuotaProject = (projectId?: string, requestHeaders?: any, accessTok
         }
         
         const getWifUserProject = (idp: string): string | undefined => {
-            if (idp === 'WiF') {
-                const configStr = localStorage.getItem('agentspace-wifConfig');
+            if (idp === 'WiF' || idp === 'Okta') {
+                const configKey = idp === 'WiF' ? 'agentspace-wifConfig' : 'agentspace-oktaConfig';
+                const configStr = localStorage.getItem(configKey);
                 if (configStr) {
                     const parsed = JSON.parse(configStr);
-                    return parsed.userProject;
+                    if (parsed.userProject) return parsed.userProject;
                 }
-            } else if (idp === 'Okta') {
-                const configStr = localStorage.getItem('agentspace-oktaConfig');
-                if (configStr) {
-                    const parsed = JSON.parse(configStr);
-                    return parsed.userProject;
+                
+                const fallbackKey = idp === 'WiF' ? 'agentspace-oktaConfig' : 'agentspace-wifConfig';
+                const fallbackStr = localStorage.getItem(fallbackKey);
+                if (fallbackStr) {
+                    const parsed = JSON.parse(fallbackStr);
+                    if (parsed.userProject) return parsed.userProject;
                 }
             }
             return undefined;
