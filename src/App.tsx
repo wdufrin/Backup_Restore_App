@@ -38,6 +38,10 @@ function App() {
     return localStorage.getItem('agentspace-googleClientId') || import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
   });
 
+  const [googleUserProject, setGoogleUserProject] = useState(() => {
+    return localStorage.getItem('agentspace-googleUserProject') || import.meta.env.VITE_GOOGLE_USER_PROJECT || '';
+  });
+
   const isIdpChangeEnabled = featureFlags.idpChangeEnabled;
   const enableGoogleIdp = featureFlags.enableGoogleIdp;
   const enableWifIdp = featureFlags.enableWifIdp;
@@ -55,6 +59,14 @@ function App() {
       sessionStorage.removeItem('agentspace-targetToken');
     }
   }, [sourceIdp, targetIdp]);
+
+  useEffect(() => {
+    localStorage.setItem('agentspace-sourceIdp', sourceIdp);
+  }, [sourceIdp]);
+
+  useEffect(() => {
+    localStorage.setItem('agentspace-targetIdp', targetIdp);
+  }, [targetIdp]);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem('theme');
     return saved === 'dark';
@@ -165,8 +177,10 @@ function App() {
 
   const handleResetGoogleConfig = () => {
     localStorage.removeItem('agentspace-googleClientId');
+    localStorage.removeItem('agentspace-googleUserProject');
     const base = { ...import.meta.env, ...runtimeConfig };
     setGoogleClientId(base.VITE_GOOGLE_CLIENT_ID || '');
+    setGoogleUserProject(base.VITE_GOOGLE_USER_PROJECT || '');
   };
 
   const handleSetAccessToken = useCallback((token: string) => {
@@ -572,6 +586,8 @@ function App() {
               setFeatureFlags={setFeatureFlags}
               googleClientId={googleClientId}
               setGoogleClientId={setGoogleClientId}
+              googleUserProject={googleUserProject}
+              setGoogleUserProject={setGoogleUserProject}
               wifConfigState={wifConfig}
               setWifConfigState={setWifConfig}
               oktaConfigState={oktaConfig}
@@ -812,9 +828,15 @@ function App() {
                     </label>
                   </div>
                   {featureFlags.enableGoogleIdp && (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Google Client ID</label>
-                      <input type="text" value={googleClientId} onChange={(e) => setGoogleClientId(e.target.value)} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Google Client ID</label>
+                        <input type="text" value={googleClientId} onChange={(e) => setGoogleClientId(e.target.value)} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Google User/Quota Project (Optional)</label>
+                        <input type="text" value={googleUserProject} onChange={(e) => setGoogleUserProject(e.target.value)} className="w-full border border-gray-300 dark:border-slate-600 rounded-md p-2 text-sm bg-white dark:bg-slate-900 dark:text-white" placeholder="Billing project where caller has Service Usage Consumer role" />
+                      </div>
                     </div>
                   )}
                 </>
@@ -877,6 +899,7 @@ function App() {
                     }
                     if (featureFlags.enableGoogleIdp) {
                       localStorage.setItem('agentspace-googleClientId', googleClientId);
+                      localStorage.setItem('agentspace-googleUserProject', googleUserProject);
                     }
                     setIsWifModalOpen(false);
                   }} 

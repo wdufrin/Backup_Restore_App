@@ -93,8 +93,15 @@ const resolveQuotaProject = (projectId?: string, requestHeaders?: any, accessTok
             requestTokenMatchesDefault: requestToken === defaultToken,
         });
         
-        const getWifUserProject = (idp: string): string | undefined => {
-            console.log("[DEBUG QUOTA] getWifUserProject for IDP:", idp);
+        const getQuotaProjectForIdp = (idp: string): string | undefined => {
+            console.log("[DEBUG QUOTA] getQuotaProjectForIdp for IDP:", idp);
+            if (idp === 'Google') {
+                const configVal = localStorage.getItem('agentspace-googleUserProject');
+                if (configVal) return configVal;
+                const envVal = import.meta.env.VITE_GOOGLE_USER_PROJECT;
+                if (envVal) return envVal;
+                return undefined;
+            }
             if (idp === 'WiF' || idp === 'Okta') {
                 const configKey = idp === 'WiF' ? 'agentspace-wifConfig' : 'agentspace-oktaConfig';
                 const configStr = localStorage.getItem(configKey);
@@ -120,16 +127,16 @@ const resolveQuotaProject = (projectId?: string, requestHeaders?: any, accessTok
         let resolved = projectId;
         if (sourceToken && targetToken) {
             if (requestToken === sourceToken) {
-                const wifProject = getWifUserProject(sourceIdp);
-                if (wifProject) resolved = wifProject;
+                const quotaProj = getQuotaProjectForIdp(sourceIdp);
+                if (quotaProj) resolved = quotaProj;
             } else if (requestToken === targetToken) {
-                const wifProject = getWifUserProject(targetIdp);
-                if (wifProject) resolved = wifProject;
+                const quotaProj = getQuotaProjectForIdp(targetIdp);
+                if (quotaProj) resolved = quotaProj;
             }
         } else {
             const activeIdp = (requestToken === targetToken) ? targetIdp : sourceIdp;
-            const wifProject = getWifUserProject(activeIdp);
-            if (wifProject) resolved = wifProject;
+            const quotaProj = getQuotaProjectForIdp(activeIdp);
+            if (quotaProj) resolved = quotaProj;
         }
         
         console.log("[DEBUG QUOTA] resolveQuotaProject output:", resolved);

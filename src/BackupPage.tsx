@@ -86,6 +86,8 @@ interface BackupPageProps {
   setFeatureFlags: React.Dispatch<React.SetStateAction<{ idpChangeEnabled: boolean, enableGoogleIdp: boolean, enableWifIdp: boolean, enableOktaIdp?: boolean }>>;
   googleClientId: string;
   setGoogleClientId: (id: string) => void;
+  googleUserProject: string;
+  setGoogleUserProject: (proj: string) => void;
   wifConfigState: any;
   setWifConfigState: React.Dispatch<React.SetStateAction<any>>;
   oktaConfigState: any;
@@ -151,8 +153,14 @@ const mapSourceToPayload = (source: any) => {
 const getOwnerFromBinding = (member: string): string => {
   if (member.startsWith('user:')) {
     return member.replace('user:', '');
-  } else if (member.startsWith('principal://')) {
-    return member.split('/subject/').pop() || member;
+  } else if (member.startsWith('principal://') || member.startsWith('principalSet://')) {
+    if (member.includes('/subject/')) {
+      return member.split('/subject/').pop() || member;
+    }
+    if (member.includes('/group/')) {
+      return member.split('/group/').pop() || member;
+    }
+    return member.split('/').pop() || member;
   } else {
     return member.replace('serviceAccount:', '');
   }
@@ -301,10 +309,9 @@ const isAgentOwnedByUser = (agent: any, userEmail: string, userSub: string, pool
   // 2. Match by WIF subject ID if available
   if (userSub && owner === userSub) return true;
   
-  // 3. Match by full WIF principal format
-  if (poolId && userSub) {
-    const wifPrincipal = `principal://iam.googleapis.com/locations/global/workforcePools/${poolId}/subject/${userSub}`;
-    if (fullMember === wifPrincipal) return true;
+  // 3. Match by WIF principal format (ignoring pool ID)
+  if (userSub && (fullMember.startsWith('principal://') || fullMember.startsWith('principalSet://'))) {
+    if (fullMember.includes('/subject/') && fullMember.split('/subject/').pop() === userSub) return true;
   }
 
   // 4. Check low-code agent definition owner
@@ -314,9 +321,8 @@ const isAgentOwnedByUser = (agent: any, userEmail: string, userSub: string, pool
     if (definition && definition.owner) {
       if (definition.owner === userEmail) return true;
       if (userSub && definition.owner === userSub) return true;
-      if (poolId && userSub) {
-        const wifPrincipal = `principal://iam.googleapis.com/locations/global/workforcePools/${poolId}/subject/${userSub}`;
-        if (definition.owner === wifPrincipal) return true;
+      if (userSub && (definition.owner.startsWith('principal://') || definition.owner.startsWith('principalSet://'))) {
+        if (definition.owner.includes('/subject/') && definition.owner.split('/subject/').pop() === userSub) return true;
       }
       // Google gaia hex ID check
       let userGaiaIdHex = "";
@@ -359,10 +365,9 @@ const isMemberCurrentUser = (member: string, userEmail: string, userSub: string,
   // 2. Direct subject match
   if (userSub && (owner === userSub || member.includes(userSub))) return true;
   
-  // 3. Full WIF principal match
-  if (poolId && userSub) {
-    const wifPrincipal = `principal://iam.googleapis.com/locations/global/workforcePools/${poolId}/subject/${userSub}`;
-    if (member === wifPrincipal) return true;
+  // 3. Full WIF principal match (ignoring pool ID)
+  if (userSub && (member.startsWith('principal://') || member.startsWith('principalSet://'))) {
+    if (member.includes('/subject/') && member.split('/subject/').pop() === userSub) return true;
   }
   
   return false;
@@ -389,6 +394,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
   setFeatureFlags,
   googleClientId,
   setGoogleClientId,
+  googleUserProject,
+  setGoogleUserProject,
   wifConfigState,
   setWifConfigState,
   oktaConfigState,
@@ -554,6 +561,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
       : ''
   );
 
+  const cidFetchedEnginesRef = useRef<Set<string>>(new Set());
+
   // Auto-generate URL from CID
   useEffect(() => {
     const { targetCid, targetAppUrl } = userTabConfig;
@@ -603,8 +612,9 @@ const BackupPage: React.FC<BackupPageProps> = ({
         if (cid) {
           addLog(`[CID Resolution] Found CID ${cid} in list cache for ${targetAppId}`);
           processApp(app);
-        } else {
+        } else if (!cidFetchedEnginesRef.current.has(targetAppId)) {
           addLog(`[CID Resolution] Fetching engine details for ${targetAppId} to resolve CID...`);
+          cidFetchedEnginesRef.current.add(targetAppId);
           api.getEngine(targetAppId, {
             projectId: targetProject,
             appLocation: targetLocation,
@@ -726,6 +736,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
     content += `VITE_ENABLE_WIF_IDP=${featureFlags.enableWifIdp}\n`;
     content += `VITE_ENABLE_OKTA_IDP=${featureFlags.enableOktaIdp || false}\n`;
     content += `VITE_GOOGLE_CLIENT_ID=${googleClientId}\n`;
+    content += `VITE_GOOGLE_USER_PROJECT=${googleUserProject}\n`;
     content += `VITE_LOG_LEVEL=${logLevel}\n\n`;
 
     content += `# --- Source Environment ---\n`;
@@ -941,6 +952,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
     localStorage.setItem('agentspace-userTabConfig', JSON.stringify(userTabConfig));
     localStorage.setItem('agentspace-featureFlags', JSON.stringify(featureFlags));
     localStorage.setItem('agentspace-googleClientId', googleClientId);
+    localStorage.setItem('agentspace-googleUserProject', googleUserProject);
     localStorage.setItem('agentspace-wifConfig', JSON.stringify(wifConfigState));
     localStorage.setItem('agentspace-shouldMigrateAgents', String(shouldMigrateAgents));
     localStorage.setItem('agentspace-shouldMigrateNotebooks', String(shouldMigrateNotebooks));
@@ -956,6 +968,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
     localStorage.removeItem('agentspace-userTabConfig');
     localStorage.removeItem('agentspace-featureFlags');
     localStorage.removeItem('agentspace-googleClientId');
+    localStorage.removeItem('agentspace-googleUserProject');
     localStorage.removeItem('agentspace-wifConfig');
     localStorage.removeItem('agentspace-shouldMigrateAgents');
     localStorage.removeItem('agentspace-shouldMigrateNotebooks');
@@ -982,6 +995,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
       enableWifIdp: base.VITE_ENABLE_WIF_IDP === 'true',
     });
     setGoogleClientId(base.VITE_GOOGLE_CLIENT_ID || '');
+    setGoogleUserProject(base.VITE_GOOGLE_USER_PROJECT || '');
     setWifConfigState({
       userProject: base.VITE_WIF_USER_PROJECT || '',
       poolId: base.VITE_WIF_POOL_ID || '',
@@ -4553,14 +4567,26 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             {featureFlags.enableGoogleIdp && (
               <div className="bg-gray-50 dark:bg-slate-700 p-4 rounded-lg border border-gray-200 dark:border-slate-600">
                 <h3 className="text-sm font-semibold text-gray-700 dark:text-white mb-3">Google Configuration</h3>
-                <div>
-                  <label className="block text-xs text-gray-500 dark:text-white mb-1">Google Client ID</label>
-                  <input 
-                    type="text" 
-                    value={googleClientId} 
-                    onChange={(e) => setGoogleClientId(e.target.value)} 
-                    className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" 
-                  />
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 dark:text-white mb-1">Google Client ID</label>
+                    <input 
+                      type="text" 
+                      value={googleClientId} 
+                      onChange={(e) => setGoogleClientId(e.target.value)} 
+                      className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white" 
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 dark:text-white mb-1">Google User/Quota Project (Optional)</label>
+                    <input 
+                      type="text" 
+                      value={googleUserProject} 
+                      onChange={(e) => setGoogleUserProject(e.target.value)} 
+                      className="bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg p-2 text-sm w-full focus:ring-blue-500 focus:border-blue-500 dark:text-white"
+                      placeholder="Billing project where caller has Service Usage Consumer role"
+                    />
+                  </div>
                 </div>
               </div>
             )}
