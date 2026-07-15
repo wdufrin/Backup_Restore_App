@@ -1769,126 +1769,144 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
     }
 
     // 1. Backup Agents
-    setProgress({ percent: 5, text: 'Fetching agents from source...' });
-    addLog(`Fetching agents from ${sourceConfig.appId} in ${sourceConfig.appLocation}...`);
-    const agents: Agent[] = [];
-    let pageToken: string | undefined = undefined;
-    do {
-      const agentsResponse = await api.listResources('agents', sourceConfig, pageToken);
-      agents.push(...(agentsResponse.agents || []));
-      pageToken = agentsResponse.nextPageToken;
-    } while (pageToken);
-
-    // Fetch IAM policies and categorize, while filtering ONLY low-code agents
     const userAgents: any[] = [];
-    const BATCH_SIZE = 10;
-    let resolvedAgentCount = 0;
+    if (shouldMigrateAgents) {
+      setProgress({ percent: 5, text: 'Fetching agents from source...' });
+      addLog(`Fetching agents from ${sourceConfig.appId} in ${sourceConfig.appLocation}...`);
+      const agents: Agent[] = [];
+      let pageToken: string | undefined = undefined;
+      do {
+        const agentsResponse = await api.listResources('agents', sourceConfig, pageToken);
+        agents.push(...(agentsResponse.agents || []));
+        pageToken = agentsResponse.nextPageToken;
+      } while (pageToken);
 
-    for (let i = 0; i < agents.length; i += BATCH_SIZE) {
-      const batch = agents.slice(i, i + BATCH_SIZE);
-      await Promise.allSettled(batch.map(async (agent) => {
-        try {
-          // 1. Fetch Agent View to check type
-          let isLowCode = true;
+      // Fetch IAM policies and categorize, while filtering ONLY low-code agents
+      const BATCH_SIZE = 10;
+      let resolvedAgentCount = 0;
+
+      for (let i = 0; i < agents.length; i += BATCH_SIZE) {
+        const batch = agents.slice(i, i + BATCH_SIZE);
+        await Promise.allSettled(batch.map(async (agent) => {
           try {
-            const rawResponse = await api.getAgentView(agent.name, sourceConfig);
-            const agentView = rawResponse?.agentView || rawResponse;
-            const rawAgentType = agentView?.agentType;
-            if (rawAgentType && rawAgentType !== 'LOW_CODE' && rawAgentType !== 'Low Code') {
-              isLowCode = false;
+            // 1. Fetch Agent View to check type
+            let isLowCode = true;
+            try {
+              const rawResponse = await api.getAgentView(agent.name, sourceConfig);
+              const agentView = rawResponse?.agentView || rawResponse;
+              const rawAgentType = agentView?.agentType;
+              if (rawAgentType && rawAgentType !== 'LOW_CODE' && rawAgentType !== 'Low Code') {
+                isLowCode = false;
+              }
+            } catch (viewErr) {
+              // Structural detection fallback if Agent View fetch fails and fallback is enabled
+              if (userTabConfig.enableAgentViewFallback) {
+                if (agent.adkAgentDefinition || agent.a2aAgentDefinition) {
+                  isLowCode = false;
+                }
+              } else {
+                isLowCode = false; // Skip if fallback is disabled
+              }
             }
-          } catch (viewErr) {
-            // Structural detection fallback if Agent View fetch fails and fallback is enabled
+
+            if (!isLowCode) {
+              if (isDebugMode) {
+                addLog(`[DEBUG] Skipping non-low-code agent ${agent.displayName || agent.name} from backup.`);
+              }
+              return;
+            }
+
+            const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
+            const agentWithPolicy = { ...agent, iamPolicy: policy, agentType: 'Low Code' };
+            const isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId);
+            (agentWithPolicy as any).category = isOwned ? 'core' : 'optional';
+            userAgents.push(agentWithPolicy);
+          } catch (e) {
             if (userTabConfig.enableAgentViewFallback) {
+              // Fallback: check structural type before adding as optional
+              let isLowCode = true;
               if (agent.adkAgentDefinition || agent.a2aAgentDefinition) {
                 isLowCode = false;
               }
+              if (isLowCode) {
+                addLog(`  - Warning: Failed to backup IAM policy for agent ${agent.name}: ${(e as any).message}`);
+                const agentCopy = { ...agent, category: 'optional' };
+                userAgents.push(agentCopy);
+              }
             } else {
-              isLowCode = false; // Skip if fallback is disabled
+              addLog(`  - Warning: Failed to backup agent ${agent.displayName || agent.name} due to view/policy fetch error: ${(e as any).message}. Skipping agent.`);
             }
+          } finally {
+            resolvedAgentCount++;
+            setProgress({
+              percent: 10 + Math.round((resolvedAgentCount / agents.length) * 35),
+              text: `Fetching agent details (${resolvedAgentCount}/${agents.length}): ${agent.displayName || agent.name}...`
+            });
           }
-
-          if (!isLowCode) {
-            if (isDebugMode) {
-              addLog(`[DEBUG] Skipping non-low-code agent ${agent.displayName || agent.name} from backup.`);
-            }
-            return;
-          }
-
-          const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
-          const agentWithPolicy = { ...agent, iamPolicy: policy, agentType: 'Low Code' };
-          const isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId);
-          (agentWithPolicy as any).category = isOwned ? 'core' : 'optional';
-          userAgents.push(agentWithPolicy);
-        } catch (e) {
-          if (userTabConfig.enableAgentViewFallback) {
-            // Fallback: check structural type before adding as optional
-            let isLowCode = true;
-            if (agent.adkAgentDefinition || agent.a2aAgentDefinition) {
-              isLowCode = false;
-            }
-            if (isLowCode) {
-              addLog(`  - Warning: Failed to backup IAM policy for agent ${agent.name}: ${(e as any).message}`);
-              const agentCopy = { ...agent, category: 'optional' };
-              userAgents.push(agentCopy);
-            }
-          } else {
-            addLog(`  - Warning: Failed to backup agent ${agent.displayName || agent.name} due to view/policy fetch error: ${(e as any).message}. Skipping agent.`);
-          }
-        } finally {
-          resolvedAgentCount++;
-          setProgress({
-            percent: 10 + Math.round((resolvedAgentCount / agents.length) * 35),
-            text: `Fetching agent details (${resolvedAgentCount}/${agents.length}): ${agent.displayName || agent.name}...`
-          });
-        }
-      }));
-    }
-    addLog(`Found ${userAgents.length} agents in selected engine.`);
-    if (isDebugMode) {
-      addLog(`[DEBUG] Agents: ${JSON.stringify(userAgents.map(a => `${a.displayName} (${(a as any).category})`), null, 2)}`);
+        }));
+      }
+      addLog(`Found ${userAgents.length} agents in selected engine.`);
+      if (isDebugMode) {
+        addLog(`[DEBUG] Agents: ${JSON.stringify(userAgents.map(a => `${a.displayName} (${(a as any).category})`), null, 2)}`);
+      }
+    } else {
+      addLog(`Skipping Agents backup (disabled by user toggle).`);
     }
 
     // 2. Backup Notebooks
-    setProgress({ percent: 50, text: 'Fetching notebooks...' });
-    addLog(`Fetching notebooks...`);
-    const response = await api.listNotebooks(sourceConfig);
-    const notebooks = response.notebooks || [];
-    const userNotebooks = [];
+    const userNotebooks: any[] = [];
+    if (shouldMigrateNotebooks) {
+      setProgress({ percent: 50, text: 'Fetching notebooks...' });
+      addLog(`Fetching notebooks...`);
+      const response = await api.listNotebooks(sourceConfig);
+      const notebooks = response.notebooks || [];
 
-    let notebookIndex = 0;
-    for (const nb of notebooks) {
-      notebookIndex++;
-      setProgress({
-        percent: 55 + Math.round((notebookIndex / notebooks.length) * 40),
-        text: `Fetching notebook details (${notebookIndex}/${notebooks.length}): ${nb.title || nb.name}...`
-      });
-      const notebookId = nb.name.split('/').pop()!;
-      try {
-        const rawNotebook = await api.getNotebook(sourceConfig, notebookId);
-        if (rawNotebook.metadata?.userRole === 'PROJECT_ROLE_OWNER') {
-          // Fetch sources
-          const fullSources = [];
-          for (const source of (rawNotebook.sources || [])) {
-            const sourceId = source.name.split('/').pop()!;
-            try {
-              const fullSource = await api.getNotebookSource(sourceConfig, notebookId, sourceId);
-              fullSources.push(fullSource);
-            } catch (sourceErr: any) {
-              fullSources.push(source);
-            }
+      let notebookIndex = 0;
+      for (const nb of notebooks) {
+        notebookIndex++;
+        setProgress({
+          percent: 55 + Math.round((notebookIndex / notebooks.length) * 40),
+          text: `Fetching notebook details (${notebookIndex}/${notebooks.length}): ${nb.title || nb.name}...`
+        });
+        const notebookId = nb.name.split('/').pop()!;
+        try {
+          const rawNotebook = await api.getNotebook(sourceConfig, notebookId);
+          let isOwned = true;
+          if (!userTabConfig.bypassOwnerFilter) {
+            // Since Notebook API does not expose userRole, we assume all accessible notebooks are owned/relevant.
+            isOwned = true;
           }
-          rawNotebook.sources = fullSources;
-          userNotebooks.push(rawNotebook);
+
+          if (isOwned) {
+            // Fetch sources
+            const fullSources = [];
+            for (const source of (rawNotebook.sources || [])) {
+              const sourceId = source.name.split('/').pop()!;
+              try {
+                const fullSource = await api.getNotebookSource(sourceConfig, notebookId, sourceId);
+                fullSources.push(fullSource);
+              } catch (sourceErr: any) {
+                fullSources.push(source);
+              }
+            }
+            rawNotebook.sources = fullSources;
+            userNotebooks.push(rawNotebook);
+          }
+        } catch (nbErr: any) {
+          addLog(`  - Error fetching details for notebook ${notebookId}: ${nbErr.message}`);
         }
-      } catch (nbErr: any) {
-        addLog(`  - Error fetching details for notebook ${notebookId}: ${nbErr.message}`);
+        await delay(500); // Rate limit
       }
-      await delay(500); // Rate limit
-    }
-    addLog(`Found ${userNotebooks.length} notebooks owned by you.`);
-    if (isDebugMode) {
-      addLog(`[DEBUG] Owned Notebooks: ${JSON.stringify(userNotebooks.map(n => n.title), null, 2)}`);
+      if (userTabConfig.bypassOwnerFilter) {
+        addLog(`Found ${userNotebooks.length} notebooks (bypassing owner filtering).`);
+      } else {
+        addLog(`Found ${userNotebooks.length} notebooks accessible to you.`);
+      }
+      if (isDebugMode) {
+        addLog(`[DEBUG] Owned Notebooks: ${JSON.stringify(userNotebooks.map(n => n.title), null, 2)}`);
+      }
+    } else {
+      addLog(`Skipping Notebooks backup (disabled by user toggle).`);
     }
 
     setProgress({ percent: 95, text: 'Preparing modal selection view...' });
@@ -1986,200 +2004,142 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
     setProgress({ percent: 5, text: 'Fetching target resources for validation...' });
     addLog(`Fetching target resources for migration validation...`);
     const targetAgents: Agent[] = [];
-    let targetPageToken: string | undefined = undefined;
-    try {
-      do {
-        const agentsResponse = await api.listResources('agents', targetConfig, targetPageToken);
-        targetAgents.push(...(agentsResponse.agents || []));
-        targetPageToken = agentsResponse.nextPageToken;
-      } while (targetPageToken);
-    } catch (err: any) {
-      addLog(`Warning: Failed to fetch target agents for validation: ${err.message}`);
+    if (shouldMigrateAgents) {
+      let targetPageToken: string | undefined = undefined;
+      try {
+        do {
+          const agentsResponse = await api.listResources('agents', targetConfig, targetPageToken);
+          targetAgents.push(...(agentsResponse.agents || []));
+          targetPageToken = agentsResponse.nextPageToken;
+        } while (targetPageToken);
+      } catch (err: any) {
+        addLog(`Warning: Failed to fetch target agents for validation: ${err.message}`);
+      }
     }
 
     let targetNotebooks: any[] = [];
-    try {
-      const response = await api.listNotebooks(targetConfig);
-      targetNotebooks = response.notebooks || [];
-    } catch (err: any) {
-      addLog(`Warning: Failed to fetch target notebooks for validation: ${err.message}`);
+    if (shouldMigrateNotebooks) {
+      try {
+        const response = await api.listNotebooks(targetConfig);
+        targetNotebooks = response.notebooks || [];
+      } catch (err: any) {
+        addLog(`Warning: Failed to fetch target notebooks for validation: ${err.message}`);
+      }
     }
-
-    setProgress({ percent: 15, text: 'Fetching source agents...' });
-    addLog(`Fetching agents from ${sourceConfig.appId}...`);
-    const agents: Agent[] = [];
-    let pageToken: string | undefined = undefined;
-    do {
-      const agentsResponse = await api.listResources('agents', sourceConfig, pageToken);
-      agents.push(...(agentsResponse.agents || []));
-      pageToken = agentsResponse.nextPageToken;
-    } while (pageToken);
 
     const fullBackupAgents: any[] = [];
     const selectableAgents: any[] = [];
+    if (shouldMigrateAgents) {
+      setProgress({ percent: 15, text: 'Fetching source agents...' });
+      addLog(`Fetching agents from ${sourceConfig.appId}...`);
+      const agents: Agent[] = [];
+      let pageToken: string | undefined = undefined;
+      do {
+        const agentsResponse = await api.listResources('agents', sourceConfig, pageToken);
+        agents.push(...(agentsResponse.agents || []));
+        pageToken = agentsResponse.nextPageToken;
+      } while (pageToken);
 
-    addLog(`Fetching and analyzing agents via Agent View...`);
-    const BATCH_SIZE = 10;
-    let resolvedAgentCount = 0;
+      addLog(`Fetching and analyzing agents via Agent View...`);
+      const BATCH_SIZE = 10;
+      let resolvedAgentCount = 0;
 
-    for (let i = 0; i < agents.length; i += BATCH_SIZE) {
-      const batch = agents.slice(i, i + BATCH_SIZE);
-      await Promise.allSettled(batch.map(async (agent) => {
-        try {
-          // 1. Fetch Agent View for exact type and owner details
-          const rawResponse = await api.getAgentView(agent.name, sourceConfig);
-          const agentView = rawResponse?.agentView || rawResponse;
-          
-          if (isDebugMode) {
-            addLog(`[DEBUG] Agent View for ${agent.displayName}: ${JSON.stringify(rawResponse, null, 2)}`);
-          }
-
-          const rawAgentType = agentView?.agentType;
-          
-          // Skip if it is explicitly ADK or A2A or not LOW_CODE
-          if (rawAgentType && rawAgentType !== 'LOW_CODE' && rawAgentType !== 'Low Code') {
-            if (isDebugMode) {
-              addLog(`[DEBUG] Skipping non-low-code agent ${agent.displayName || agent.name} (Type: ${rawAgentType}) from migration.`);
-            }
-            return;
-          }
-
-          // If rawAgentType is missing, perform structural fallback check
-          if (!rawAgentType && (agent.adkAgentDefinition || agent.a2aAgentDefinition)) {
-            if (isDebugMode) {
-              addLog(`[DEBUG] Structural Fallback: Skipping non-low-code agent ${agent.displayName || agent.name} from migration.`);
-            }
-            return;
-          }
-
-          // 2. Fetch IAM Policy
-          let policy: any = null;
+      for (let i = 0; i < agents.length; i += BATCH_SIZE) {
+        const batch = agents.slice(i, i + BATCH_SIZE);
+        await Promise.allSettled(batch.map(async (agent) => {
           try {
-            policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
-          } catch (policyErr: any) {
+            // 1. Fetch Agent View for exact type and owner details
+            const rawResponse = await api.getAgentView(agent.name, sourceConfig);
+            const agentView = rawResponse?.agentView || rawResponse;
+            
             if (isDebugMode) {
-              addLog(`    - Warning: Failed to fetch IAM policy: ${policyErr.message}`);
+              addLog(`[DEBUG] Agent View for ${agent.displayName}: ${JSON.stringify(rawResponse, null, 2)}`);
             }
-          }
 
-          // 3. Resolve Owner
-          const agentOwner = agentView?.ownerUserPrincipal || agentView?.ownerDisplayName || agentView?.agentOwner || agentView?.owner;
-          let isOwned = false;
-          let hasOwner = false;
-
-          if (agentOwner) {
-            hasOwner = true;
-            isOwned = agentOwner.toLowerCase().includes(userEmail.toLowerCase()) || 
-                      (userSub && agentOwner.includes(userSub));
+            const rawAgentType = agentView?.agentType;
             
-            // Prefix-based matching fallback to handle workforce pools and domain mismatches gracefully
-            if (!isOwned && userEmail) {
-              const prefix = userEmail.split('@')[0].toLowerCase();
-              if (prefix && prefix.length > 2) {
-                isOwned = agentOwner.toLowerCase().includes(prefix);
-              }
-            }
-          } else if (policy && policy.bindings) {
-            const ownerBinding = policy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
-            if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
-              hasOwner = true;
-              const firstMember = ownerBinding.members[0];
-              isOwned = firstMember.toLowerCase().includes(userEmail.toLowerCase()) ||
-                        (userSub && firstMember.includes(userSub)) ||
-                        (poolId && firstMember.includes(poolId));
-              
-              // Prefix-based matching fallback
-              if (!isOwned && userEmail) {
-                const prefix = userEmail.split('@')[0].toLowerCase();
-                if (prefix && prefix.length > 2) {
-                  isOwned = firstMember.toLowerCase().includes(prefix);
-                }
-              }
-            }
-          }
-
-          const enrichedAgent = { 
-            ...agent, 
-            agentType: 'Low Code',
-            iamPolicy: policy
-          };
-          fullBackupAgents.push(enrichedAgent);
-
-          // Only show WIF user-owned agents OR shared/unowned agents (no explicit owner)
-          if (isOwned || !hasOwner) {
-            const collision = await checkAgentCollision(
-              enrichedAgent,
-              targetAgents,
-              targetConfig,
-              userEmail,
-              userSub,
-              poolId,
-              addLog
-            );
-            const disabled = collision.disabled;
-            const disabledReason = collision.disabledReason;
-
-            selectableAgents.push({
-              name: agent.name,
-              displayName: agent.displayName,
-              agentType: 'Low Code',
-              disabled,
-              disabledReason,
-              category: isOwned ? 'core' : 'optional'
-            });
-          }
-        } catch (e: any) {
-          if (userTabConfig.enableAgentViewFallback) {
-            addLog(`  - Warning: Failed to fetch Agent View for agent ${agent.displayName || agent.name}: ${e.message}. Attempting structural & IAM policy fallback...`);
-            
-            // 1. Structural Type Check
-            let agentType = "Low Code";
-            if (agent.adkAgentDefinition) agentType = "ADK";
-            else if (agent.a2aAgentDefinition) agentType = "A2A";
-
-            if (agentType !== 'Low Code') {
+            // Skip if it is explicitly ADK or A2A or not LOW_CODE
+            if (rawAgentType && rawAgentType !== 'LOW_CODE' && rawAgentType !== 'Low Code') {
               if (isDebugMode) {
-                addLog(`[DEBUG] Fallback: Skipping non-low-code agent ${agent.displayName || agent.name} (Type: ${agentType}) from migration.`);
+                addLog(`[DEBUG] Skipping non-low-code agent ${agent.displayName || agent.name} (Type: ${rawAgentType}) from migration.`);
               }
               return;
             }
 
-            // 2. IAM Policy Owner Check
+            // If rawAgentType is missing, perform structural fallback check
+            if (!rawAgentType && (agent.adkAgentDefinition || agent.a2aAgentDefinition)) {
+              if (isDebugMode) {
+                addLog(`[DEBUG] Structural Fallback: Skipping non-low-code agent ${agent.displayName || agent.name} from migration.`);
+              }
+              return;
+            }
+
+            // 2. Fetch IAM Policy
+            let policy: any = null;
+            try {
+              policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
+            } catch (policyErr: any) {
+              if (isDebugMode) {
+                addLog(`    - Warning: Failed to fetch IAM policy: ${policyErr.message}`);
+              }
+            }
+
+            // 3. Resolve Owner
+            const agentOwner = agentView?.ownerUserPrincipal || agentView?.ownerDisplayName || agentView?.agentOwner || agentView?.owner;
             let isOwned = false;
             let hasOwner = false;
-            let agentWithPolicy: any = { ...agent };
-            try {
-              const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
-              agentWithPolicy = { ...agent, iamPolicy: policy };
+
+            if (agentOwner) {
+              hasOwner = true;
+              isOwned = agentOwner.toLowerCase().includes(userEmail.toLowerCase()) || 
+                        (userSub && agentOwner.includes(userSub));
               
-              isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId);
-              
-              if (policy && policy.bindings) {
-                const ownerBinding = policy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
-                if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
-                  hasOwner = true;
+              // Prefix-based matching fallback to handle workforce pools and domain mismatches gracefully
+              if (!isOwned && userEmail) {
+                const prefix = userEmail.split('@')[0].toLowerCase();
+                if (prefix && prefix.length > 2) {
+                  isOwned = agentOwner.toLowerCase().includes(prefix);
                 }
               }
-              
-              fullBackupAgents.push(agentWithPolicy);
-            } catch (policyErr: any) {
-              addLog(`    - Warning: Failed to fetch IAM policy for fallback: ${policyErr.message}`);
-              fullBackupAgents.push(agent);
+            } else if (policy && policy.bindings) {
+              const ownerBinding = policy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
+              if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
+                hasOwner = true;
+                const firstMember = ownerBinding.members[0];
+                isOwned = firstMember.toLowerCase().includes(userEmail.toLowerCase()) ||
+                          (userSub && firstMember.includes(userSub)) ||
+                          (poolId && firstMember.includes(poolId));
+                
+                // Prefix-based matching fallback
+                if (!isOwned && userEmail) {
+                  const prefix = userEmail.split('@')[0].toLowerCase();
+                  if (prefix && prefix.length > 2) {
+                    isOwned = firstMember.toLowerCase().includes(prefix);
+                  }
+                }
+              }
             }
+
+            const enrichedAgent = { 
+              ...agent, 
+              agentType: 'Low Code',
+              iamPolicy: policy
+            };
+            fullBackupAgents.push(enrichedAgent);
 
             // Only show WIF user-owned agents OR shared/unowned agents (no explicit owner)
             if (isOwned || !hasOwner) {
-               const collision = await checkAgentCollision(
-                 agentWithPolicy,
-                 targetAgents,
-                 targetConfig,
-                 userEmail,
-                 userSub,
-                 poolId,
-                 addLog
-               );
-               const disabled = collision.disabled;
-               const disabledReason = collision.disabledReason;
+              const collision = await checkAgentCollision(
+                enrichedAgent,
+                targetAgents,
+                targetConfig,
+                userEmail,
+                userSub,
+                poolId,
+                addLog
+              );
+              const disabled = collision.disabled;
+              const disabledReason = collision.disabledReason;
 
               selectableAgents.push({
                 name: agent.name,
@@ -2190,67 +2150,137 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                 category: isOwned ? 'core' : 'optional'
               });
             }
-          } else {
-            addLog(`  - Warning: Failed to fetch Agent View for agent ${agent.displayName || agent.name}: ${e.message}. Skipping agent.`);
+          } catch (e: any) {
+            if (userTabConfig.enableAgentViewFallback) {
+              addLog(`  - Warning: Failed to fetch Agent View for agent ${agent.displayName || agent.name}: ${e.message}. Attempting structural & IAM policy fallback...`);
+              
+              // 1. Structural Type Check
+              let agentType = "Low Code";
+              if (agent.adkAgentDefinition) agentType = "ADK";
+              else if (agent.a2aAgentDefinition) agentType = "A2A";
+
+              if (agentType !== 'Low Code') {
+                if (isDebugMode) {
+                  addLog(`[DEBUG] Fallback: Skipping non-low-code agent ${agent.displayName || agent.name} (Type: ${agentType}) from migration.`);
+                }
+                return;
+              }
+
+              // 2. IAM Policy Owner Check
+              let isOwned = false;
+              let hasOwner = false;
+              let agentWithPolicy: any = { ...agent };
+              try {
+                const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
+                agentWithPolicy = { ...agent, iamPolicy: policy };
+                
+                isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId);
+                
+                if (policy && policy.bindings) {
+                  const ownerBinding = policy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
+                  if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
+                    hasOwner = true;
+                  }
+                }
+                
+                fullBackupAgents.push(agentWithPolicy);
+              } catch (policyErr: any) {
+                addLog(`    - Warning: Failed to fetch IAM policy for fallback: ${policyErr.message}`);
+                fullBackupAgents.push(agent);
+              }
+
+              // Only show WIF user-owned agents OR shared/unowned agents (no explicit owner)
+              if (isOwned || !hasOwner) {
+                 const collision = await checkAgentCollision(
+                   agentWithPolicy,
+                   targetAgents,
+                   targetConfig,
+                   userEmail,
+                   userSub,
+                   poolId,
+                   addLog
+                 );
+                 const disabled = collision.disabled;
+                 const disabledReason = collision.disabledReason;
+
+                selectableAgents.push({
+                  name: agent.name,
+                  displayName: agent.displayName,
+                  agentType: 'Low Code',
+                  disabled,
+                  disabledReason,
+                  category: isOwned ? 'core' : 'optional'
+                });
+              }
+            } else {
+              addLog(`  - Warning: Failed to fetch Agent View for agent ${agent.displayName || agent.name}: ${e.message}. Skipping agent.`);
+            }
+          } finally {
+            resolvedAgentCount++;
+            setProgress({
+              percent: 20 + Math.round((resolvedAgentCount / agents.length) * 35),
+              text: `Analyzing source agent (${resolvedAgentCount}/${agents.length}): ${agent.displayName || agent.name}...`
+            });
           }
-        } finally {
-          resolvedAgentCount++;
-          setProgress({
-            percent: 20 + Math.round((resolvedAgentCount / agents.length) * 35),
-            text: `Analyzing source agent (${resolvedAgentCount}/${agents.length}): ${agent.displayName || agent.name}...`
-          });
-        }
-      }));
+        }));
+      }
+    } else {
+      addLog(`Skipping source/target agents validation (disabled by user toggle).`);
     }
 
-    setProgress({ percent: 60, text: 'Fetching notebooks...' });
-    addLog(`Fetching notebooks...`);
-    const response = await api.listNotebooks(sourceConfig);
-    const notebooks = response.notebooks || [];
     const fullBackupNotebooks: any[] = [];
     const selectableNotebooks: any[] = [];
+    if (shouldMigrateNotebooks) {
+      setProgress({ percent: 60, text: 'Fetching notebooks...' });
+      addLog(`Fetching notebooks...`);
+      const response = await api.listNotebooks(sourceConfig);
+      const notebooks = response.notebooks || [];
 
-    let notebookIndex = 0;
-    for (const nb of notebooks) {
-      notebookIndex++;
-      setProgress({
-        percent: 65 + Math.round((notebookIndex / notebooks.length) * 30),
-        text: `Analyzing source notebook (${notebookIndex}/${notebooks.length}): ${nb.title || nb.name}...`
-      });
-      const notebookId = nb.name.split('/').pop()!;
-      try {
-        const rawNotebook = await api.getNotebook(sourceConfig, notebookId);
-        const fullSources = [];
-        for (const source of (rawNotebook.sources || [])) {
-          const sourceId = source.name.split('/').pop()!;
-          try {
-            const fullSource = await api.getNotebookSource(sourceConfig, notebookId, sourceId);
-            fullSources.push(fullSource);
-          } catch (sourceErr: any) {
-            fullSources.push(source);
-          }
-        }
-        rawNotebook.sources = fullSources;
-        fullBackupNotebooks.push(rawNotebook);
-
-        const isOwned = rawNotebook.metadata?.userRole === 'PROJECT_ROLE_OWNER';
-        
-        const cleanTitle = rawNotebook.title || rawNotebook.displayName || 'Restored Notebook';
-        const targetTitle = cleanTitle.endsWith(' (Restored)') ? cleanTitle : `${cleanTitle} (Restored)`;
-        const exists = targetNotebooks.some(n => n.title === cleanTitle || n.title === targetTitle);
-
-        selectableNotebooks.push({
-          name: rawNotebook.name,
-          displayName: cleanTitle,
-          agentType: 'Notebook',
-          disabled: exists,
-          disabledReason: exists ? 'Already exists in target' : undefined,
-          category: isOwned ? 'core' : 'optional'
+      let notebookIndex = 0;
+      for (const nb of notebooks) {
+        notebookIndex++;
+        setProgress({
+          percent: 65 + Math.round((notebookIndex / notebooks.length) * 30),
+          text: `Analyzing source notebook (${notebookIndex}/${notebooks.length}): ${nb.title || nb.name}...`
         });
-      } catch (nbErr: any) {
-        addLog(`  - Error fetching details for notebook ${notebookId}: ${nbErr.message}`);
+        const notebookId = nb.name.split('/').pop()!;
+        try {
+          const rawNotebook = await api.getNotebook(sourceConfig, notebookId);
+          const fullSources = [];
+          for (const source of (rawNotebook.sources || [])) {
+            const sourceId = source.name.split('/').pop()!;
+            try {
+              const fullSource = await api.getNotebookSource(sourceConfig, notebookId, sourceId);
+              fullSources.push(fullSource);
+            } catch (sourceErr: any) {
+              fullSources.push(source);
+            }
+          }
+          rawNotebook.sources = fullSources;
+          fullBackupNotebooks.push(rawNotebook);
+
+          // Since Notebook API does not expose userRole, we assume all accessible notebooks are owned/relevant.
+          const isOwned = true;
+          
+          const cleanTitle = rawNotebook.title || rawNotebook.displayName || 'Restored Notebook';
+          const targetTitle = cleanTitle.endsWith(' (Restored)') ? cleanTitle : `${cleanTitle} (Restored)`;
+          const exists = targetNotebooks.some(n => n.title === cleanTitle || n.title === targetTitle);
+
+          selectableNotebooks.push({
+            name: rawNotebook.name,
+            displayName: cleanTitle,
+            agentType: 'Notebook',
+            disabled: exists,
+            disabledReason: exists ? 'Already exists in target' : undefined,
+            category: isOwned ? 'core' : 'optional'
+          });
+        } catch (nbErr: any) {
+          addLog(`  - Error fetching details for notebook ${notebookId}: ${nbErr.message}`);
+        }
+        await delay(300);
       }
-      await delay(300);
+    } else {
+      addLog(`Skipping source/target notebooks validation (disabled by user toggle).`);
     }
 
     if (selectableAgents.length === 0 && selectableNotebooks.length === 0) {
