@@ -2263,8 +2263,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           const isOwned = true;
           
           const cleanTitle = rawNotebook.title || rawNotebook.displayName || 'Restored Notebook';
-          const targetTitle = cleanTitle.endsWith(' (Restored)') ? cleanTitle : `${cleanTitle} (Restored)`;
-          const exists = targetNotebooks.some(n => n.title === cleanTitle || n.title === targetTitle);
+          const exists = targetNotebooks.some(n => n.title === cleanTitle);
 
           selectableNotebooks.push({
             name: rawNotebook.name,
@@ -2391,8 +2390,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
 
       const notebookItems: SelectableItem[] = (backupData.notebooks || []).map((nb: any) => {
         const cleanTitle = nb.title || 'Restored Notebook';
-        const targetTitle = cleanTitle.endsWith(' (Restored)') ? cleanTitle : `${cleanTitle} (Restored)`;
-        const exists = targetNotebookTitles.has(nb.title) || targetNotebookTitles.has(targetTitle);
+        const exists = targetNotebookTitles.has(cleanTitle);
         return {
           name: nb.name,
           displayName: nb.title || 'Unnamed Notebook',
@@ -2515,17 +2513,16 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               text: `Restoring notebook (${notebookIndex}/${filteredNotebooks.length}): ${nb.title || nb.name}...`
             });
             const cleanTitle = nb.title || 'Restored Notebook';
-            const targetTitle = cleanTitle.endsWith(' (Restored)') ? cleanTitle : `${cleanTitle} (Restored)`;
             
-            const alreadyExists = existingNotebooks.some((n: any) => n.title === targetTitle || n.title === cleanTitle);
+            const alreadyExists = existingNotebooks.some((n: any) => n.title === cleanTitle);
             if (alreadyExists) {
-              addLog(`  - Skipping notebook "${nb.title}" (already restored)`);
+              addLog(`  - Skipping notebook "${cleanTitle}" (already exists in target)`);
               continue;
             }
 
             try {
               const payload = {
-                title: targetTitle,
+                title: cleanTitle,
                 metadata: nb.metadata
               };
               const newNotebook = await api.createNotebook(targetConfig, payload);
