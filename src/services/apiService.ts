@@ -62,12 +62,26 @@ const resolveQuotaProject = (projectId?: string, requestHeaders?: any, accessTok
     if (!projectId) return undefined;
 
     try {
-        const sourceToken = sessionStorage.getItem('agentspace-sourceToken');
-        const targetToken = sessionStorage.getItem('agentspace-targetToken');
-        const defaultToken = sessionStorage.getItem('agentspace-accessToken');
+        const getSessionItem = (key: string): string | null => {
+            if (typeof sessionStorage !== 'undefined' && sessionStorage && typeof sessionStorage.getItem === 'function') {
+                return sessionStorage.getItem(key);
+            }
+            return null;
+        };
+
+        const getLocalItem = (key: string): string | null => {
+            if (typeof localStorage !== 'undefined' && localStorage && typeof localStorage.getItem === 'function') {
+                return localStorage.getItem(key);
+            }
+            return null;
+        };
+
+        const sourceToken = getSessionItem('agentspace-sourceToken');
+        const targetToken = getSessionItem('agentspace-targetToken');
+        const defaultToken = getSessionItem('agentspace-accessToken');
         
-        const sourceIdp = localStorage.getItem('agentspace-sourceIdp') || 'Google';
-        const targetIdp = localStorage.getItem('agentspace-targetIdp') || 'Google';
+        const sourceIdp = getLocalItem('agentspace-sourceIdp') || 'Google';
+        const targetIdp = getLocalItem('agentspace-targetIdp') || 'Google';
         
         let requestToken = accessToken;
         if (!requestToken && requestHeaders && requestHeaders['Authorization']) {
@@ -93,18 +107,11 @@ const resolveQuotaProject = (projectId?: string, requestHeaders?: any, accessTok
             requestTokenMatchesDefault: requestToken === defaultToken,
         });
         
-        const getQuotaProjectForIdp = (idp: string): string | undefined => {
-            console.log("[DEBUG QUOTA] getQuotaProjectForIdp for IDP:", idp);
-            if (idp === 'Google') {
-                const configVal = localStorage.getItem('agentspace-googleUserProject');
-                if (configVal) return configVal;
-                const envVal = import.meta.env.VITE_GOOGLE_USER_PROJECT;
-                if (envVal) return envVal;
-                return undefined;
-            }
+        const getWifUserProject = (idp: string): string | undefined => {
+            console.log("[DEBUG QUOTA] getWifUserProject for IDP:", idp);
             if (idp === 'WiF' || idp === 'Okta') {
                 const configKey = idp === 'WiF' ? 'agentspace-wifConfig' : 'agentspace-oktaConfig';
-                const configStr = localStorage.getItem(configKey);
+                const configStr = getLocalItem(configKey);
                 console.log(`[DEBUG QUOTA] Config key ${configKey} exists:`, !!configStr);
                 if (configStr) {
                     const parsed = JSON.parse(configStr);
@@ -113,7 +120,7 @@ const resolveQuotaProject = (projectId?: string, requestHeaders?: any, accessTok
                 }
                 
                 const fallbackKey = idp === 'WiF' ? 'agentspace-oktaConfig' : 'agentspace-wifConfig';
-                const fallbackStr = localStorage.getItem(fallbackKey);
+                const fallbackStr = getLocalItem(fallbackKey);
                 console.log(`[DEBUG QUOTA] Fallback key ${fallbackKey} exists:`, !!fallbackStr);
                 if (fallbackStr) {
                     const parsed = JSON.parse(fallbackStr);
@@ -127,16 +134,16 @@ const resolveQuotaProject = (projectId?: string, requestHeaders?: any, accessTok
         let resolved = projectId;
         if (sourceToken && targetToken) {
             if (requestToken === sourceToken) {
-                const quotaProj = getQuotaProjectForIdp(sourceIdp);
-                if (quotaProj) resolved = quotaProj;
+                const wifProject = getWifUserProject(sourceIdp);
+                if (wifProject) resolved = wifProject;
             } else if (requestToken === targetToken) {
-                const quotaProj = getQuotaProjectForIdp(targetIdp);
-                if (quotaProj) resolved = quotaProj;
+                const wifProject = getWifUserProject(targetIdp);
+                if (wifProject) resolved = wifProject;
             }
         } else {
             const activeIdp = (requestToken === targetToken) ? targetIdp : sourceIdp;
-            const quotaProj = getQuotaProjectForIdp(activeIdp);
-            if (quotaProj) resolved = quotaProj;
+            const wifProject = getWifUserProject(activeIdp);
+            if (wifProject) resolved = wifProject;
         }
         
         console.log("[DEBUG QUOTA] resolveQuotaProject output:", resolved);
@@ -243,7 +250,7 @@ export const gapiRequest = async <T>(
         errorMessage = String(error);
     }
     
-    throw new Error(errorMessage);
+    throw new Error(errorMessage, { cause: error });
   }
 };
 
@@ -980,8 +987,6 @@ export const signInWithOidcPopup = async (
 
                     console.log("[DEBUG] Exchanging authorization code client-side.");
 
-                    let tokenData: any;
-
                     // Exchange Authorization Code + Code Verifier for the ID Token
                     const tokenExchangeBody = new URLSearchParams({
                         grant_type: 'authorization_code',
@@ -1002,7 +1007,7 @@ export const signInWithOidcPopup = async (
                         reject(new Error(`Failed to exchange authorization code: ${errText || tokenResponse.statusText}`));
                         return;
                     }
-                    tokenData = await tokenResponse.json();
+                    const tokenData = await tokenResponse.json();
 
                     const idToken = tokenData.id_token;
 
@@ -1325,7 +1330,7 @@ export const streamChat = async (_agentName: string | null, query: string, sessi
                             // Simple approach: Try to parse the accumulated buffer if it looks like an object.
 
                             // Remove leading comma or bracket if present and strictly matching an object
-                            let cleanBuffer = buffer.trim();
+                            const cleanBuffer = buffer.trim();
                             // If it starts with ',' or '[', strip them for checking but we need to be careful not to strip valid parts if we are inside...
                             // Actually, robust way: Find first '{'
                             const firstBrace = cleanBuffer.indexOf('{');

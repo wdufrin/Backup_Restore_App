@@ -45,16 +45,30 @@ const DISCOVERY_DOCS = [
  * Ensures the script is only added to the page once.
  */
 const loadGapiScript = (): Promise<void> => {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
         if (isGapiLoaded) {
             return resolve();
         }
+
+        const existing = document.querySelector<HTMLScriptElement>('script[src="https://apis.google.com/js/api.js"]');
+        if (existing) {
+            const readyState = (existing as any).readyState;
+            if (readyState === 'complete' || readyState === 'loaded') {
+                isGapiLoaded = true;
+                return resolve();
+            }
+            existing.addEventListener('load', () => resolve(), { once: true });
+            existing.addEventListener('error', () => reject(new Error('Failed to load gapi script.')), { once: true });
+            return;
+        }
+
         const script = document.createElement('script');
         script.src = 'https://apis.google.com/js/api.js';
         script.onload = () => {
             isGapiLoaded = true;
             resolve();
         };
+        script.onerror = () => reject(new Error('Failed to load gapi script.'));
         document.body.appendChild(script);
     });
 };
@@ -68,9 +82,8 @@ const loadGapiScript = (): Promise<void> => {
  */
 export const initGapiClient = (accessToken: string): Promise<void> => {
     if (!gapiClientPromise) {
-        gapiClientPromise = new Promise(async (resolve, reject) => {
-            try {
-                await loadGapiScript();
+        gapiClientPromise = new Promise((resolve, reject) => {
+            loadGapiScript().then(() => {
                 window.gapi.load('client', async () => {
                     try {
                         if (window.gapi.config) {
@@ -88,11 +101,11 @@ export const initGapiClient = (accessToken: string): Promise<void> => {
                         reject(err);
                     }
                 });
-            } catch (err) {
+            }).catch((err) => {
                 console.error('Error loading gapi script:', err);
                 gapiClientPromise = null; // Reset on failure
                 reject(err);
-            }
+            });
         });
     } else {
         // If already initialized or initializing, wait for it to finish then set the new token.

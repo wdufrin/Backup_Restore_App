@@ -1,4 +1,10 @@
 steps:
+  # Run npm security audit
+  - name: 'node:20-slim'
+    entrypoint: 'npm'
+    args: ['audit', '--audit-level=high']
+    id: Audit
+
   # Build the container image
   - name: 'gcr.io/cloud-builders/docker'
     args:
