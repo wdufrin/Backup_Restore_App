@@ -34,9 +34,7 @@ vi.mock('../services/apiService', () => {
     getNotebook: vi.fn(() => Promise.resolve({ sources: [] })),
     getNotebookSource: vi.fn(() => Promise.resolve({})),
     getUserInfo: vi.fn(() => Promise.resolve({ sub: '123' })),
-    checkServiceEnabled: vi.fn(() => Promise.resolve(true)),
     listReasoningEngines: vi.fn(() => Promise.resolve({ reasoningEngines: [] })),
-    listBuckets: vi.fn(() => Promise.resolve({ buckets: [] })),
     createNotebook: vi.fn(() => Promise.resolve({ name: 'projects/test/locations/global/notebooks/new-nb-1' })),
   };
 });

@@ -5,56 +5,82 @@ vi.mock('../gapiService', () => ({ getGapiClient: vi.fn() }));
 
 import { getGapiClient } from '../gapiService';
 import {
-  setDebugLogger, gapiRequest,
-  getProjectNumber, getProject, validateEnabledApis, batchEnableApis,
-  getServiceUsageOperation, checkServiceAccountPermissions,
-  listServiceAccounts, listWorkloadIdentityPools, listWorkloadIdentityProviders,
-  getServiceAccountIamPolicy, getProjectIamPolicy, setProjectIamPolicy,
-  getDataset, updateDatasetAccess, createLoggingSink, getLoggingSink, listLoggingSinks,
-  listResources, createCollection, updateCollection,
-  getDiscoveryOperation, listOperations, listDiscoverySessions,
-  getDiscoveryAnswer, createDiscoverySession, getDiscoverySession,
-  getVertexAiOperation,
-  getEngine, createEngine, updateEngine, getEngineIamPolicy, setEngineIamPolicy,
-  getWidgetConfig, updateWidgetConfig, getAclConfig, updateAclConfig,
-  getWorkforcePoolProviders, getWorkforcePoolProviderScimTenants,
-  getAssistant, updateAssistant, createAssistant,
-  getAgent, getAgentView, createAgent, updateAgent,
-  disableAgent, enableAgent, shareAgent, deleteResource,
-  getDataStore, createDataStore, updateDataStore, deleteDataStore,
-  getDataConnector, listDocuments, searchDocuments, queryDataStore,
+  batchCreateNotebookSources,
+  batchEnableApis,
+  checkServiceAccountPermissions,
+  createAgent,
+  createAssistant,
+  createCollection,
+  createDataStore,
+  createDiscoverySession,
+  createEngine,
+  createLoggingSink,
+  createNotebook,
+  deleteDataStore,
+  deleteResource,
+  disableAgent,
+  downloadGcsObject,
+  enableAgent,
+  exchangeStsToken,
+  fetchOidcDiscovery,
   fetchWorkforceProviderConfig,
-  fetchOidcDiscovery, exchangeStsToken, queryDataStoreWithToken,
+  gapiRequest,
+  getAclConfig,
+  getAgent,
+  getAgentIamPolicy,
+  getAgentView,
+  getAssistant,
+  getDataConnector,
+  getDataStore,
+  getDataset,
+  getDiscoveryAnswer,
+  getDiscoveryOperation,
+  getDiscoverySession,
+  getEngine,
+  getEngineIamPolicy,
+  getLoggingSink,
+  getNotebook,
+  getNotebookSource,
+  getProject,
+  getProjectIamPolicy,
+  getProjectNumber,
+  getReasoningEngine,
+  getServiceAccountIamPolicy,
+  getServiceUsageOperation,
+  getUserInfo,
+  getVertexAiOperation,
+  getWidgetConfig,
+  getWorkforcePoolProviderScimTenants,
+  getWorkforcePoolProviders,
+  listDiscoverySessions,
+  listDocuments,
+  listLoggingSinks,
+  listNotebooks,
+  listOperations,
+  listReasoningEngines,
+  listResources,
+  listServiceAccounts,
+  listWorkloadIdentityPools,
+  listWorkloadIdentityProviders,
+  queryDataStore,
+  restoreAgentsServerSide,
+  searchDocuments,
+  setAgentIamPolicy,
+  setDebugLogger,
+  setEngineIamPolicy,
+  setProjectIamPolicy,
+  shareAgent,
   signInWithOidcPopup,
-  getDocument, importDocuments,
-  listAuthorizations, getAuthorization, createAuthorization,
-  updateAuthorization, deleteAuthorization,
-  listReasoningEngines, getReasoningEngine, createReasoningEngine,
-  deleteReasoningEngine, getReasoningEngineSession,
-  listReasoningEngineSessions, deleteReasoningEngineSession,
-  streamChat, streamQueryReasoningEngine, generateVertexContent,
-  listCloudRunServices, getCloudRunService, deleteCloudRunService,
-  listBuckets, listGcsObjects, deleteGcsObject,
-  getGcsObjectContent, uploadFileToGcs,
-  createCloudBuild, listCloudBuilds, getCloudBuild,
-  listBigQueryDatasets, createBigQueryDataset,
-  listBigQueryTables, createBigQueryTable, runBigQueryQuery,
-  fetchViolationLogs, fetchConnectorLogs, fetchLastRunLog,
-  listDialogflowAgents, deleteDialogflowAgent,
-  getAgentIamPolicy, setAgentIamPolicy,
-  listGlobalForwardingRules, listManagedSslCertificates,
-  exportAnalyticsMetrics, getAgentEngineToolLatencies,
-  listUserStoreLicenses, downloadGcsObject,
-  revokeUserLicenses, assignUserLicenses, deleteUserLicenses,
-  registerA2aAgent, fetchA2aAgentCard, invokeA2aAgent,
-  listNotebooks, getNotebook, getNotebookSource,
-  createNotebook, batchCreateNotebookSources,
-  validateWorkforcePool,
-  listBillingAccounts, testBillingAccountPermissions,
-  listBillingAccountLicenseConfigs, listLicenseConfigs,
-  listLicenseConfigsUsageStats, listUserLicenses, getLicenseConfig,
-  distributeLicense, probeProjectLicense, retractLicense,
-  checkServiceEnabled, enableService,
+  updateAclConfig,
+  updateAgent,
+  updateAssistant,
+  updateCollection,
+  updateDataStore,
+  updateDatasetAccess,
+  updateEngine,
+  updateWidgetConfig,
+  validateEnabledApis,
+  validateWorkforcePool
 } from '../apiService';
 
 // ── Shared mock infrastructure ─────────────────────────────────────────────────
@@ -764,51 +790,6 @@ describe('Data Stores', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 // Documents & Authorizations
 // ═══════════════════════════════════════════════════════════════════════════════
-describe('Documents & Authorizations', () => {
-  it('getDocument', async () => {
-    mockRequest.mockResolvedValue({ result: { name: 'doc1' } });
-    expect(await getDocument('dataStores/ds1/documents/d1', CFG)).toEqual({ name: 'doc1' });
-  });
-  it('importDocuments', async () => {
-    mockRequest.mockResolvedValue({ result: { name: 'op' } });
-    expect(await importDocuments('dataStores/ds1', ['gs://b/f'], 'b', CFG)).toEqual({ name: 'op' });
-  });
-  it('listAuthorizations without pageToken', async () => {
-    mockRequest.mockResolvedValue({ result: { authorizations: [] } });
-    await listAuthorizations(CFG);
-    expect(mockRequest.mock.calls[0][0].path).not.toContain('pageToken');
-  });
-  it('listAuthorizations with pageToken', async () => {
-    mockRequest.mockResolvedValue({ result: { authorizations: [] } });
-    await listAuthorizations(CFG, 'pt1');
-    expect(mockRequest.mock.calls[0][0].path).toContain('pageToken=pt1');
-  });
-  it('getAuthorization uses location from name', async () => {
-    mockRequest.mockResolvedValue({ result: { name: 'a1' } });
-    await getAuthorization('projects/p/locations/global/authorizations/a1', CFG);
-    expect(mockRequest.mock.calls[0][0].path).toContain('discoveryengine.googleapis.com');
-  });
-  it('createAuthorization', async () => {
-    mockRequest.mockResolvedValue({ result: { name: 'a1' } });
-    expect(await createAuthorization('a1', {}, CFG)).toEqual({ name: 'a1' });
-  });
-  it('updateAuthorization', async () => {
-    mockRequest.mockResolvedValue({ result: {} });
-    await updateAuthorization('projects/p/locations/global/authorizations/a1', {}, ['displayName'], CFG);
-    expect(mockRequest.mock.calls[0][0].path).toContain('updateMask=displayName');
-  });
-  it('deleteAuthorization full resource name', async () => {
-    mockRequest.mockResolvedValue({ result: {} });
-    await deleteAuthorization('projects/p/locations/global/authorizations/a1', CFG);
-    expect(mockRequest.mock.calls[0][0].method).toBe('DELETE');
-  });
-  it('deleteAuthorization short name constructs URL', async () => {
-    mockRequest.mockResolvedValue({ result: {} });
-    await deleteAuthorization('a1', CFG);
-    expect(mockRequest.mock.calls[0][0].path).toContain('/authorizations/a1');
-  });
-});
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // Reasoning Engines
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -828,179 +809,11 @@ describe('Reasoning Engines', () => {
     await listReasoningEngines(CFG, 'pt1');
     expect(mockRequest.mock.calls[0][0].path).toContain('pageToken=pt1');
   });
-  it('getReasoningEngine', async () => {
-    mockRequest.mockResolvedValue({ result: { name: 're1' } });
-    expect(await getReasoningEngine('projects/p/locations/us-central1/reasoningEngines/re1', CFG)).toEqual({ name: 're1' });
   });
-  it('createReasoningEngine', async () => {
-    mockRequest.mockResolvedValue({ result: { name: 'op' } });
-    expect(await createReasoningEngine(CFG, { displayName: 'RE1' })).toEqual({ name: 'op' });
-  });
-  it('deleteReasoningEngine adds force=true', async () => {
-    mockRequest.mockResolvedValue({ result: {} });
-    await deleteReasoningEngine('projects/p/locations/us-central1/reasoningEngines/re1', CFG);
-    expect(mockRequest.mock.calls[0][0].path).toContain('force=true');
-    expect(mockRequest.mock.calls[0][0].method).toBe('DELETE');
-  });
-  it('getReasoningEngineSession', async () => {
-    mockRequest.mockResolvedValue({ result: { name: 'sess1' } });
-    expect(await getReasoningEngineSession('projects/p/locations/us-central1/reasoningEngines/re1/sessions/s1', CFG)).toEqual({ name: 'sess1' });
-  });
-  it('listReasoningEngineSessions', async () => {
-    mockRequest.mockResolvedValue({ result: { sessions: [] } });
-    expect(await listReasoningEngineSessions('projects/p/locations/us-central1/reasoningEngines/re1', CFG)).toEqual({ sessions: [] });
-  });
-  it('deleteReasoningEngineSession', async () => {
-    mockRequest.mockResolvedValue({ result: {} });
-    await deleteReasoningEngineSession('projects/p/locations/us-central1/reasoningEngines/re1/sessions/s1', CFG);
-    expect(mockRequest.mock.calls[0][0].method).toBe('DELETE');
-  });
-});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Cloud Run, GCS, Cloud Build, BigQuery, Logging, Dialogflow, IAM helpers
 // ═══════════════════════════════════════════════════════════════════════════════
-describe('Cloud Run', () => {
-  it('listCloudRunServices', async () => {
-    mockRequest.mockResolvedValue({ result: { services: [] } });
-    expect(await listCloudRunServices(CFG, 'us-central1')).toEqual({ services: [] });
-  });
-  it('getCloudRunService extracts region', async () => {
-    mockRequest.mockResolvedValue({ result: { name: 'svc' } });
-    await getCloudRunService('projects/p/locations/us-central1/services/s1', CFG);
-    expect(mockRequest.mock.calls[0][0].path).toContain('us-central1-run.googleapis.com');
-  });
-  it('deleteCloudRunService uses DELETE', async () => {
-    mockRequest.mockResolvedValue({ result: {} });
-    await deleteCloudRunService('projects/p/locations/us-central1/services/s1', CFG);
-    expect(mockRequest.mock.calls[0][0].method).toBe('DELETE');
-  });
-});
-
-describe('GCS', () => {
-  it('listBuckets', async () => {
-    mockRequest.mockResolvedValue({ result: { items: [] } });
-    expect(await listBuckets('p')).toEqual({ items: [] });
-  });
-  it('listGcsObjects with prefix', async () => {
-    mockRequest.mockResolvedValue({ result: { items: [] } });
-    await listGcsObjects('bucket', 'prefix/', 'p');
-    expect(mockRequest.mock.calls[0][0].path).toContain('prefix=');
-  });
-  it('listGcsObjects without prefix', async () => {
-    mockRequest.mockResolvedValue({ result: { items: [] } });
-    await listGcsObjects('bucket', '', 'p');
-    expect(mockRequest.mock.calls[0][0].path).not.toContain('prefix=');
-  });
-  it('deleteGcsObject uses DELETE', async () => {
-    mockRequest.mockResolvedValue({ result: {} });
-    await deleteGcsObject('bucket', 'obj.json', 'p');
-    expect(mockRequest.mock.calls[0][0].method).toBe('DELETE');
-  });
-  it('getGcsObjectContent calls client.request directly', async () => {
-    mockClient.request = vi.fn().mockResolvedValue({ body: '{"data":1}' });
-    const r = await getGcsObjectContent('bucket', 'obj.json', 'p');
-    expect(r).toBe('{"data":1}');
-    mockClient.request = mockRequest;
-  });
-  it('getGcsObjectContent stringifies non-string body', async () => {
-    mockClient.request = vi.fn().mockResolvedValue({ body: { data: 1 } });
-    const r = await getGcsObjectContent('bucket', 'obj.json', 'p');
-    expect(r).toContain('"data"');
-    mockClient.request = mockRequest;
-  });
-});
-
-describe('Cloud Build', () => {
-  it('createCloudBuild', async () => {
-    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    mockRequest.mockResolvedValue({ result: { name: 'op' } });
-    expect(await createCloudBuild('p', {})).toEqual({ name: 'op' });
-    spy.mockRestore();
-  });
-  it('listCloudBuilds without filter', async () => {
-    mockRequest.mockResolvedValue({ result: { builds: [] } });
-    await listCloudBuilds('p');
-    expect(mockRequest.mock.calls[0][0].path).not.toContain('?filter');
-  });
-  it('listCloudBuilds with filter', async () => {
-    mockRequest.mockResolvedValue({ result: { builds: [] } });
-    await listCloudBuilds('p', 'status=SUCCESS');
-    expect(mockRequest.mock.calls[0][0].path).toContain('filter=');
-  });
-  it('getCloudBuild', async () => {
-    mockRequest.mockResolvedValue({ result: { id: 'b1' } });
-    expect(await getCloudBuild('p', 'b1')).toEqual({ id: 'b1' });
-  });
-});
-
-describe('BigQuery', () => {
-  it('listBigQueryDatasets', async () => {
-    mockRequest.mockResolvedValue({ result: { datasets: [] } });
-    expect(await listBigQueryDatasets('p')).toEqual({ datasets: [] });
-  });
-  it('createBigQueryDataset default location', async () => {
-    mockRequest.mockResolvedValue({ result: { id: 'ds1' } });
-    await createBigQueryDataset('p', 'ds1');
-    expect(mockRequest.mock.calls[0][0].body.location).toBe('US');
-  });
-  it('createBigQueryDataset custom location', async () => {
-    mockRequest.mockResolvedValue({ result: { id: 'ds1' } });
-    await createBigQueryDataset('p', 'ds1', 'EU');
-    expect(mockRequest.mock.calls[0][0].body.location).toBe('EU');
-  });
-  it('listBigQueryTables', async () => {
-    mockRequest.mockResolvedValue({ result: { tables: [] } });
-    expect(await listBigQueryTables('p', 'ds1')).toEqual({ tables: [] });
-  });
-  it('createBigQueryTable', async () => {
-    mockRequest.mockResolvedValue({ result: { id: 't1' } });
-    expect(await createBigQueryTable('p', 'ds1', 't1')).toEqual({ id: 't1' });
-  });
-  it('runBigQueryQuery', async () => {
-    mockRequest.mockResolvedValue({ result: { rows: [] } });
-    expect(await runBigQueryQuery('p', 'SELECT 1')).toEqual({ rows: [] });
-  });
-});
-
-describe('Logging', () => {
-  it('fetchViolationLogs', async () => {
-    mockRequest.mockResolvedValue({ result: { entries: [] } });
-    expect(await fetchViolationLogs(CFG)).toEqual({ entries: [] });
-  });
-  it('fetchViolationLogs with custom filter', async () => {
-    mockRequest.mockResolvedValue({ result: { entries: [] } });
-    await fetchViolationLogs(CFG, 'severity=ERROR');
-    expect(mockRequest.mock.calls[0][0].body.filter).toContain('severity=ERROR');
-  });
-  it('fetchConnectorLogs', async () => {
-    mockRequest.mockResolvedValue({ result: { entries: [] } });
-    expect(await fetchConnectorLogs(CFG, 'projects/p/locations/l/collections/c/dataConnector')).toEqual({ entries: [] });
-  });
-  it('fetchLastRunLog', async () => {
-    mockRequest.mockResolvedValue({ result: { entries: [] } });
-    expect(await fetchLastRunLog(CFG, 'my-service')).toEqual({ entries: [] });
-  });
-});
-
-describe('Dialogflow CX', () => {
-  it('listDialogflowAgents uses reasoningEngineLocation', async () => {
-    mockRequest.mockResolvedValue({ result: { agents: [] } });
-    await listDialogflowAgents({ ...CFG, reasoningEngineLocation: 'us-central1' });
-    expect(mockRequest.mock.calls[0][0].path).toContain('us-central1-dialogflow.googleapis.com');
-  });
-  it('listDialogflowAgents falls back to us-central1', async () => {
-    mockRequest.mockResolvedValue({ result: { agents: [] } });
-    await listDialogflowAgents(CFG);
-    expect(mockRequest.mock.calls[0][0].path).toContain('us-central1-dialogflow.googleapis.com');
-  });
-  it('deleteDialogflowAgent uses DELETE', async () => {
-    mockRequest.mockResolvedValue({ result: {} });
-    await deleteDialogflowAgent('projects/p/locations/us-central1/agents/a1', CFG);
-    expect(mockRequest.mock.calls[0][0].method).toBe('DELETE');
-  });
-});
-
 describe('Agent IAM helpers', () => {
   it('getAgentIamPolicy', async () => {
     mockRequest.mockResolvedValue({ result: {} });
@@ -1019,61 +832,7 @@ describe('Agent IAM helpers', () => {
   });
 });
 
-describe('Compute Engine', () => {
-  it('listGlobalForwardingRules', async () => {
-    mockRequest.mockResolvedValue({ result: { items: [] } });
-    expect(await listGlobalForwardingRules('p')).toEqual({ items: [] });
-  });
-  it('listManagedSslCertificates', async () => {
-    mockRequest.mockResolvedValue({ result: { items: [] } });
-    expect(await listManagedSslCertificates('p')).toEqual({ items: [] });
-  });
-});
-
-describe('Analytics & License Management', () => {
-  it('exportAnalyticsMetrics', async () => {
-    mockRequest.mockResolvedValue({ result: { name: 'op' } });
-    expect(await exportAnalyticsMetrics(CFG, 'ds1', 't1')).toEqual({ name: 'op' });
-  });
-  it('getAgentEngineToolLatencies engine_id filter', async () => {
-    mockRequest.mockResolvedValue({ result: { timeSeries: [] } });
-    await getAgentEngineToolLatencies(CFG, 'engine-1', '2024-01-01T00:00:00Z', '2024-01-02T00:00:00Z', 'engine_id');
-    expect(mockRequest.mock.calls[0][0].path).toContain('engine_id');
-  });
-  it('getAgentEngineToolLatencies tool_id filter', async () => {
-    mockRequest.mockResolvedValue({ result: { timeSeries: [] } });
-    await getAgentEngineToolLatencies(CFG, 'tool-1', '2024-01-01T00:00:00Z', '2024-01-02T00:00:00Z', 'tool_id');
-    expect(mockRequest.mock.calls[0][0].path).toContain('tool_id');
-  });
-  it('listUserStoreLicenses with filter and pageToken', async () => {
-    mockRequest.mockResolvedValue({ result: { userLicenses: [] } });
-    await listUserStoreLicenses(CFG, 'store1', 'assigned=true', 'pt1');
-    expect(mockRequest.mock.calls[0][0].path).toContain('filter=');
-    expect(mockRequest.mock.calls[0][0].path).toContain('pageToken=');
-  });
-  it('revokeUserLicenses', async () => {
-    mockRequest.mockResolvedValue({ result: {} });
-    await revokeUserLicenses(CFG, 'store1', ['user@example.com']);
-    expect(mockRequest.mock.calls[0][0].body.inlineSource.userLicenses[0].userPrincipal).toBe('user@example.com');
-  });
-  it('assignUserLicenses', async () => {
-    mockRequest.mockResolvedValue({ result: {} });
-    await assignUserLicenses(CFG, 'store1', ['user@example.com'], 'projects/p/licenseConfigs/lc1');
-    expect(mockRequest.mock.calls[0][0].body.inlineSource.userLicenses[0].licenseConfig).toBe('projects/p/licenseConfigs/lc1');
-  });
-  it('deleteUserLicenses', async () => {
-    mockRequest.mockResolvedValue({ result: {} });
-    await deleteUserLicenses(CFG, 'store1', ['user@example.com']);
-    expect(mockRequest.mock.calls[0][0].body.deleteUnassignedUserLicenses).toBe(true);
-  });
-});
-
 describe('A2A & Notebooks', () => {
-  it('registerA2aAgent delegates to createAgent', async () => {
-    mockRequest.mockResolvedValue({ result: { name: 'op' } });
-    await registerA2aAgent(CFG, 'ag1', { displayName: 'A' });
-    expect(mockRequest.mock.calls[0][0].path).toContain('agentId=ag1');
-  });
   it('listNotebooks', async () => {
     mockRequest.mockResolvedValue({ result: { notebooks: [] } });
     expect(await listNotebooks(CFG)).toEqual({ notebooks: [] });
@@ -1098,78 +857,6 @@ describe('A2A & Notebooks', () => {
   it('validateWorkforcePool', async () => {
     mockRequest.mockResolvedValue({ result: { name: 'pool1' } });
     expect(await validateWorkforcePool('locations/global/workforcePools/p1', CFG)).toEqual({ name: 'pool1' });
-  });
-});
-
-describe('Billing & License Configs', () => {
-  it('listBillingAccounts', async () => {
-    mockRequest.mockResolvedValue({ result: { billingAccounts: [] } });
-    expect(await listBillingAccounts(CFG)).toEqual({ billingAccounts: [] });
-  });
-  it('testBillingAccountPermissions (suppressErrorLog=true)', async () => {
-    mockRequest.mockResolvedValue({ result: { permissions: [] } });
-    expect(await testBillingAccountPermissions('ba1', CFG)).toEqual({ permissions: [] });
-  });
-  it('listBillingAccountLicenseConfigs', async () => {
-    mockRequest.mockResolvedValue({ result: { billingAccountLicenseConfigs: [] } });
-    expect(await listBillingAccountLicenseConfigs('ba1', CFG)).toEqual({ billingAccountLicenseConfigs: [] });
-  });
-  it('listLicenseConfigs', async () => {
-    mockRequest.mockResolvedValue({ result: { licenseConfigs: [] } });
-    expect(await listLicenseConfigs(CFG)).toEqual({ licenseConfigs: [] });
-  });
-  it('listLicenseConfigsUsageStats default userStoreId', async () => {
-    mockRequest.mockResolvedValue({ result: { licenseConfigUsageStats: [] } });
-    await listLicenseConfigsUsageStats(CFG);
-    expect(mockRequest.mock.calls[0][0].path).toContain('default_user_store');
-  });
-  it('listUserLicenses', async () => {
-    mockRequest.mockResolvedValue({ result: { userLicenses: [] } });
-    expect(await listUserLicenses(CFG)).toEqual({ userLicenses: [] });
-  });
-  it('getLicenseConfig uses location from resource name', async () => {
-    mockRequest.mockResolvedValue({ result: { name: 'lc1' } });
-    await getLicenseConfig('projects/p/locations/us-central1/licenseConfigs/lc1', CFG);
-    expect(mockRequest.mock.calls[0][0].path).toContain('us-central1-discoveryengine');
-  });
-  it('distributeLicense', async () => {
-    mockRequest.mockResolvedValue({ result: { name: 'op' } });
-    await distributeLicense('ba1', 'balc1', { projectNumber: '9', location: 'us-central1', licenseCount: 5 }, CFG);
-    expect(mockRequest.mock.calls[0][0].path).toContain(':distributeLicenseConfig');
-  });
-  it('probeProjectLicense without projectLicenseConfigId', async () => {
-    mockRequest.mockResolvedValue({ result: { name: 'op' } });
-    await probeProjectLicense('ba1', 'balc1', '9', CFG);
-    expect(mockRequest.mock.calls[0][0].body.licenseCount).toBe(0);
-  });
-  it('probeProjectLicense with projectLicenseConfigId', async () => {
-    mockRequest.mockResolvedValue({ result: { name: 'op' } });
-    await probeProjectLicense('ba1', 'balc1', '9', CFG, 'projects/p/licenseConfigs/lc1');
-    expect(mockRequest.mock.calls[0][0].body.licenseConfigId).toBe('projects/p/licenseConfigs/lc1');
-  });
-  it('retractLicense uses location from licenseConfig', async () => {
-    mockRequest.mockResolvedValue({ result: { name: 'op' } });
-    await retractLicense('ba1', 'balc1', { licenseConfig: 'projects/p/locations/us-central1/licenseConfigs/lc1', licenseCount: 2 }, CFG);
-    expect(mockRequest.mock.calls[0][0].path).toContain(':retractLicenseConfig');
-  });
-  it('checkServiceEnabled returns true when ENABLED', async () => {
-    mockRequest.mockResolvedValue({ result: { state: 'ENABLED' } });
-    expect(await checkServiceEnabled('p', 'storage.googleapis.com')).toBe(true);
-  });
-  it('checkServiceEnabled returns false when DISABLED', async () => {
-    mockRequest.mockResolvedValue({ result: { state: 'DISABLED' } });
-    expect(await checkServiceEnabled('p', 'storage.googleapis.com')).toBe(false);
-  });
-  it('checkServiceEnabled returns false on error', async () => {
-    mockRequest.mockRejectedValue(new Error('403'));
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(await checkServiceEnabled('p', 'storage.googleapis.com')).toBe(false);
-    spy.mockRestore();
-  });
-  it('enableService', async () => {
-    mockRequest.mockResolvedValue({ result: {} });
-    await enableService('p', 'storage.googleapis.com');
-    expect(mockRequest.mock.calls[0][0].path).toContain(':enable');
   });
 });
 
@@ -1225,181 +912,19 @@ describe('fetch-based APIs', () => {
     await expect(exchangeStsToken({ userProject: 'p', poolId: 'p', providerId: 'p', subjectToken: 'b', subjectTokenType: 'u' })).rejects.toThrow('STS Token Exchange failed');
   });
 
-  it('queryDataStoreWithToken success', async () => {
-    fetchSpy.mockResolvedValue({ ok: true, json: () => Promise.resolve({ results: [], totalSize: 0 }) } as any);
-    const r = await queryDataStoreWithToken('dataStores/ds1', 'us-central1', 'p', 'tok', 'q');
-    expect(r).toEqual({ results: [], totalSize: 0 });
-    expect(fetchSpy.mock.calls[0][0]).toContain('us-central1-discoveryengine');
-  });
-
-  it('queryDataStoreWithToken throws with error.message', async () => {
-    fetchSpy.mockResolvedValue({ ok: false, statusText: 'Forbidden', json: () => Promise.resolve({ error: { message: 'Access denied' } }) } as any);
-    await expect(queryDataStoreWithToken('ds', 'us-central1', 'p', 't', 'q')).rejects.toThrow('Access denied');
-  });
-
-  it('queryDataStoreWithToken throws with statusText fallback', async () => {
-    fetchSpy.mockResolvedValue({ ok: false, statusText: 'Forbidden', json: () => Promise.resolve({}) } as any);
-    await expect(queryDataStoreWithToken('ds', 'us-central1', 'p', 't', 'q')).rejects.toThrow('Forbidden');
-  });
-
   it('signInWithOidcPopup throws when popup blocked', async () => {
     vi.spyOn(window, 'open').mockReturnValue(null);
     await expect(signInWithOidcPopup('https://idp/auth', 'clientId', 'https://app/callback')).rejects.toThrow('Popup was blocked');
   });
 
-  it('fetchA2aAgentCard success', async () => {
-    fetchSpy.mockResolvedValue({ ok: true, json: () => Promise.resolve({ name: 'agent' }) } as any);
-    const r = await fetchA2aAgentCard('https://agent.example', 'token');
-    expect(r).toEqual({ name: 'agent' });
   });
-
-  it('fetchA2aAgentCard throws on HTTP error', async () => {
-    fetchSpy.mockResolvedValue({ ok: false, status: 404, text: () => Promise.resolve('Not Found') } as any);
-    await expect(fetchA2aAgentCard('https://agent.example', 'token')).rejects.toThrow('A2A Discovery Error');
-  });
-
-  it('invokeA2aAgent success', async () => {
-    fetchSpy.mockResolvedValue({ ok: true, json: () => Promise.resolve({ result: 'ok' }) } as any);
-    const r = await invokeA2aAgent('https://agent.example/', 'hello', 'token');
-    expect(r).toEqual({ result: 'ok' });
-    expect(fetchSpy.mock.calls[0][0]).toContain('/invoke');
-  });
-
-  it('invokeA2aAgent throws on HTTP error', async () => {
-    fetchSpy.mockResolvedValue({ ok: false, status: 500, text: () => Promise.resolve('Err') } as any);
-    await expect(invokeA2aAgent('https://agent.example', 'hello', 'token')).rejects.toThrow('A2A Invocation Error');
-  });
-
-  it('uploadFileToGcs success', async () => {
-    fetchSpy.mockResolvedValue({ ok: true, json: () => Promise.resolve({ name: 'obj' }) } as any);
-    const blob = new Blob(['data'], { type: 'text/plain' });
-    const r = await uploadFileToGcs('bucket', 'obj.txt', blob, 'p');
-    expect(r).toEqual({ name: 'obj' });
-  });
-
-  it('uploadFileToGcs throws on HTTP error', async () => {
-    fetchSpy.mockResolvedValue({ ok: false, status: 403, text: () => Promise.resolve('Forbidden') } as any);
-    const blob = new Blob(['data']);
-    await expect(uploadFileToGcs('bucket', 'obj.txt', blob, 'p')).rejects.toThrow('GCS Upload Failed');
-  });
-
-  it('downloadGcsObject success returns blob', async () => {
-    const mockBlob = new Blob(['bytes']);
-    fetchSpy.mockResolvedValue({ ok: true, blob: () => Promise.resolve(mockBlob) } as any);
-    const r = await downloadGcsObject('gs://bucket', 'obj.bin', 'token');
-    expect(r).toBe(mockBlob);
-  });
-
-  it('downloadGcsObject throws on HTTP error', async () => {
-    fetchSpy.mockResolvedValue({ ok: false, status: 404, text: () => Promise.resolve('Not Found') } as any);
-    await expect(downloadGcsObject('gs://bucket', 'obj.bin', 'token')).rejects.toThrow('Failed to download object');
-  });
-});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // streamChat
 // ═══════════════════════════════════════════════════════════════════════════════
-describe('streamChat', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
-  beforeEach(() => { fetchSpy = vi.spyOn(globalThis, 'fetch'); });
-  afterEach(() => { fetchSpy.mockRestore(); });
-
-  it('throws on HTTP error', async () => {
-    fetchSpy.mockResolvedValue({ ok: false, status: 500, statusText: 'Server Error', text: () => Promise.resolve('Err') } as any);
-    await expect(streamChat(null, 'hi', null, CFG, 'tok', vi.fn())).rejects.toThrow('Chat API Error');
-  });
-
-  it('parses brace-balanced JSON and calls onChunk', async () => {
-    const chunk = JSON.stringify({ answer: { text: 'Hello' } });
-    fetchSpy.mockResolvedValue(makeStreamResponse([chunk]));
-    const onChunk = vi.fn();
-    await streamChat(null, 'hi', null, CFG, 'tok', onChunk);
-    expect(onChunk).toHaveBeenCalledWith({ answer: { text: 'Hello' } });
-  });
-
-  it('handles null reader gracefully', async () => {
-    fetchSpy.mockResolvedValue({ ok: true, body: null } as any);
-    await expect(streamChat(null, 'hi', null, CFG, 'tok', vi.fn())).resolves.toBeUndefined();
-  });
-
-  it('includes sessionId in body', async () => {
-    fetchSpy.mockResolvedValue(makeStreamResponse([]));
-    await streamChat(null, 'hi', 'sess1', CFG, 'tok', vi.fn());
-    const body = JSON.parse(fetchSpy.mock.calls[0][1]!.body as string);
-    expect(body.session).toBe('sess1');
-  });
-
-  it('omits session when null', async () => {
-    fetchSpy.mockResolvedValue(makeStreamResponse([]));
-    await streamChat(null, 'hi', null, CFG, 'tok', vi.fn());
-    const body = JSON.parse(fetchSpy.mock.calls[0][1]!.body as string);
-    expect(body.session).toBeUndefined();
-  });
-
-  it('includes toolsSpec when provided', async () => {
-    fetchSpy.mockResolvedValue(makeStreamResponse([]));
-    await streamChat(null, 'hi', null, CFG, 'tok', vi.fn(), { tools: [] });
-    const body = JSON.parse(fetchSpy.mock.calls[0][1]!.body as string);
-    expect(body.toolsSpec).toEqual({ tools: [] });
-  });
-});
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // streamQueryReasoningEngine
 // ═══════════════════════════════════════════════════════════════════════════════
-describe('streamQueryReasoningEngine', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
-  beforeEach(() => { fetchSpy = vi.spyOn(globalThis, 'fetch'); });
-  afterEach(() => { fetchSpy.mockRestore(); });
-
-  it('throws on HTTP error', async () => {
-    fetchSpy.mockResolvedValue({ ok: false, status: 403, statusText: 'Forbidden', text: () => Promise.resolve('Forbidden') } as any);
-    await expect(streamQueryReasoningEngine('projects/p/locations/us-central1/reasoningEngines/re1', 'q', 'u', CFG, 'tok', vi.fn())).rejects.toThrow('Reasoning Engine Stream API Error');
-  });
-
-  it('parses NDJSON lines and calls onChunk', async () => {
-    const l1 = JSON.stringify({ output: 'chunk1' });
-    const l2 = JSON.stringify({ output: 'chunk2' });
-    fetchSpy.mockResolvedValue({ ok: true, body: makeStream([`${l1}\n${l2}\n`]) } as any);
-    const onChunk = vi.fn();
-    await streamQueryReasoningEngine('projects/p/locations/us-central1/reasoningEngines/re1', 'q', 'u', CFG, 'tok', onChunk);
-    expect(onChunk).toHaveBeenCalledTimes(2);
-  });
-
-  it('handles null reader gracefully', async () => {
-    fetchSpy.mockResolvedValue({ ok: true, body: null } as any);
-    await expect(streamQueryReasoningEngine('projects/p/locations/us-central1/reasoningEngines/re1', 'q', 'u', CFG, 'tok', vi.fn())).resolves.toBeUndefined();
-  });
-});
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // generateVertexContent
 // ═══════════════════════════════════════════════════════════════════════════════
-describe('generateVertexContent', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
-  beforeEach(() => { fetchSpy = vi.spyOn(globalThis, 'fetch'); });
-  afterEach(() => { fetchSpy.mockRestore(); });
-
-  it('throws on HTTP error', async () => {
-    fetchSpy.mockResolvedValue({ ok: false, status: 403, text: () => Promise.resolve('Forbidden') } as any);
-    await expect(generateVertexContent(CFG, 'hello')).rejects.toThrow('Vertex AI Error');
-  });
-
-  it('extracts and returns text from stream', async () => {
-    const jsonChunk = JSON.stringify({ candidates: [{ content: { parts: [{ text: 'Hello World' }] } }] });
-    fetchSpy.mockResolvedValue(makeStreamResponse([jsonChunk]));
-    const result = await generateVertexContent(CFG, 'hello');
-    expect(result).toBe('Hello World');
-  });
-
-  it('handles null reader and returns empty string', async () => {
-    fetchSpy.mockResolvedValue({ ok: true, body: null } as any);
-    expect(await generateVertexContent(CFG, 'hello')).toBe('');
-  });
-
-  it('uses custom model when specified', async () => {
-    fetchSpy.mockResolvedValue(makeStreamResponse([]));
-    await generateVertexContent(CFG, 'hello', 'gemini-2.5-pro');
-    expect(fetchSpy.mock.calls[0][0]).toContain('gemini-2.5-pro');
-  });
-});

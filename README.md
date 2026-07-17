@@ -1,6 +1,6 @@
 # Gemini Enterprise Backup & Recovery App
 
-## 1. Overview
+## 1. Overview & Architecture
 
 This application provides self-service backup and recovery capabilities for Gemini Enterprise configurations, focusing on Search/Chat Engines, Assistants, low-code Agents, Notebooks, and Chat History archives. It facilitates multi-environment deployments, sequential account switching for cross-identity provider (IDP) migrations, and automated remapping of external connectors (such as SharePoint or Google Drive).
 
@@ -22,111 +22,65 @@ The application supports three distinct modes of operation depending on configur
 *   **Flags needed**: `VITE_IDP_CHANGE_ENABLED=true`
 *   **Action**: Activates a 4-step guided migration workflow (Backup -> Sign Out -> Sign In Target -> Restore).
 
----
+### Component Interactions & Topology
 
-## 2. Quick Start (Get Running Locally in < 5 Mins)
+```mermaid
+graph TD
+    subgraph Client ["Client Browser"]
+        Frontend["React SPA (Vite / Browser)"]
+    end
 
-Follow these steps to run the application locally using standard Google OAuth login:
+    subgraph Auth ["Authentication Services"]
+        GIS["Google Sign-In (accounts.google.com)"]
+        IdP["Azure Entra ID (login.microsoftonline.com)"]
+        STS["Google STS (sts.googleapis.com)"]
+    end
 
-### Step 1: Clone the Repository
-```bash
-git clone <repository_url>
-cd Backup_Restore_App
+    subgraph GoogleCloud ["Google Cloud API Endpoints"]
+        DE["Discovery Engine (*.discoveryengine.googleapis.com)"]
+    end
+
+    %% Network flows
+    Frontend -->|"1. Google Login (HTTPS/443)"| GIS
+    Frontend -->|"2. Entra ID Login (HTTPS/443)"| IdP
+    Frontend -->|"3. Exchange STS Token (HTTPS/443)"| STS
+    
+    Frontend -->|"4. Fetch/Restore Agents & IAM (HTTPS/443)"| DE
 ```
 
-### Step 2: Install Dependencies
-```bash
-npm install
-```
+### Network Endpoints & Ports
 
-### Step 3: Configure Environment Variables
-Create a `.env` file in the root directory:
-```bash
-cp .env.example .env
-```
-Open `.env` and fill in your Google Client ID (see [Security Configurations](#security-configurations) to obtain one):
-```env
-VITE_ENABLE_GOOGLE_IDP=true
-VITE_GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
-VITE_ENABLE_ADMIN_MODE=true
-```
-
-### Step 4: Run the Application
-Launch the Vite development server:
-```bash
-npm run dev
-```
-Open your browser and navigate to `http://localhost:5173`.
-
----
-
-## 3. Environment Variables Reference
-
-The following environment variables configure the application during build-time (default settings baked into the bundle). 
-
-> [!NOTE]
-> **Local Storage Overrides**: Dynamic overrides set by administrators in the UI (e.g. via the login settings modal or Admin View) are saved directly in the browser's `localStorage` and take precedence over build-time defaults. Clicking the **Reset** button in the UI clears local overrides and restores these default values.
-
-| Variable Name | Required | Default Value | Description |
-| :--- | :--- | :--- | :--- |
-| `VITE_ENABLE_ADMIN_MODE` | No | `false` | Enables the administrative settings and environment mapping UI. |
-| `VITE_IDP_CHANGE_ENABLED` | No | `false` | Activates step-by-step account switching for cross-IDP migrations. |
-| `VITE_ENABLE_GOOGLE_IDP` | No | `true` | Enables standard Google Account login option. |
-| `VITE_GOOGLE_CLIENT_ID` | Yes (if Google IDP is on) | - | OAuth 2.0 Client ID for standard Google accounts authentication. |
-| `VITE_GOOGLE_USER_PROJECT` | No | - | Overrides default quota/billing project for standard Google login. |
-| `VITE_ENABLE_WIF_IDP` | No | `false` | Enables Workforce Identity Federation (Entra ID) login option. |
-| `VITE_ENABLE_OKTA_IDP` | No | `false` | Enables Okta Workforce Identity Federation login option. |
-| `VITE_LOG_LEVEL` | No | `INFO` | Adjusts browser logs verbosity (`DEBUG`, `INFO`, `WARN`, `ERROR`). |
-| `VITE_SOURCE_PROJECT` | No | - | Default Source GCP Project ID. |
-| `VITE_SOURCE_LOCATION` | No | `global` | Default Source Discovery Engine Location (e.g., `global`, `us`, `eu`). |
-| `VITE_TARGET_PROJECT` | No | - | Default Target GCP Project ID. |
-| `VITE_TARGET_LOCATION` | No | `global` | Default Target Discovery Engine Location. |
-| `VITE_DATASTORE_MAPPING` | No | `{}` | JSON string mapping source datastore IDs to target datastore IDs. |
-| `VITE_COLLECTION_MAPPING` | No | `{}` | JSON string mapping source collection IDs to target collection IDs. |
+| Source | Destination | Hostname / URL | Port | Protocol | Purpose |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| User Browser | App Host (Vite Dev) | `localhost` | 5173 | HTTP | Local frontend development server |
+| User Browser | App Ingress | `backup.ge-dufrin.com` | 443 | HTTPS | Production application entry point |
+| User Browser | Google Sign-in | `accounts.google.com` | 443 | HTTPS | Client Google authentication |
+| User Browser | Microsoft Entra | `login.microsoftonline.com` | 443 | HTTPS | Client WIF/OIDC identity provider login |
+| User Browser | Google STS | `sts.googleapis.com` | 443 | HTTPS | Exchanging ID provider tokens for GCP access tokens |
+| User Browser | Discovery Engine | `*.discoveryengine.googleapis.com` | 443 | HTTPS | Bulk retrieval and creation of agent/engine configurations |
 
 ---
 
-## 4. Production Deployment Guide
+## 2. Security & Data Protection
 
-### Container Build
-To package the application as a Docker container:
-```bash
-docker build -t gcr.io/YOUR_PROJECT_ID/backup-restore-app:latest .
-```
+To comply with enterprise security requirements, this application implements a **client-side only data boundary**:
 
-### Option A: Cloud Run Deployment
-Deploy the container to Google Cloud Run:
-```bash
-gcloud run deploy backup-restore-app \
-    --image gcr.io/YOUR_PROJECT_ID/backup-restore-app:latest \
-    --platform managed \
-    --port 8080 \
-    --allow-unauthenticated \
-    --set-env-vars="ALLOWED_ORIGINS=https://your-cloud-run-url.run.app,ALLOWED_EMAIL_DOMAIN=your-org-domain.com"
-```
-
-### Option B: GKE Deployment
-Apply the Kubernetes manifests located in the `kubernetes/` directory:
-1. Edit [kubernetes/deployment.yaml](file:///usr/local/google/home/wdufrin/Documents/Code/Backup_Restore_App/kubernetes/deployment.yaml) to point to your container registry image path.
-2. Deploy manifests:
-   ```bash
-   kubectl apply -f kubernetes/
-   ```
-
-> [!NOTE]
-> **Container Host Security**: Since this application runs entirely client-side in the user's browser, the container host (Cloud Run / GKE) acts strictly as a static web server. The container's runtime service account does **not** need any GCP IAM permissions, as all API interactions are authenticated via the end-user's browser credentials.
+*   **Zero-Data Host Server**: The hosting container (Cloud Run or GKE) acts strictly as a static web server delivering HTML/JS bundles. No configuration files, credentials, or backup payloads are ever sent to, processed by, or stored on the hosting server.
+*   **Encrypted Local Cache**: Backup snapshots are stored in the user's browser local cache (**IndexedDB**). 
+*   **AES-GCM Encryption**: All data stored in IndexedDB is encrypted at rest using **256-bit AES-GCM**.
+*   **In-Memory Key Management**: The symmetric encryption key is dynamically generated in memory at the time of user login and stored securely in `sessionStorage`. Once the browser tab is closed or the user signs out, the key is permanently destroyed, rendering any cached data in IndexedDB unreadable.
 
 ---
 
-## 5. Prerequisites & Security
+## 3. System Requirements & IAM Setup
 
 ### Minimum IAM Permissions
-The permissions required to use this application are structured based on whether the user is running standard migrations (User Mode) or managing global settings and staging storage (Admin Mode).
+API interactions are authenticated using the active OAuth credentials of the end-user. Users executing backup and restore operations need standard Discovery Engine roles combined with specific custom permissions.
 
 #### 1. User Mode (Least-Privilege Migrations)
 For standard users executing backup and restore operations, it is assumed they already have the default **Discovery Engine User** role (`roles/discoveryengine.user`). 
 
-To allow them to extract resources from a **Source Project** and recreate them in a **Target Project**, assign a custom role containing the following **additional** permissions (excluding permissions already covered by `roles/discoveryengine.user`):
+Create a custom IAM role (`customBackupMigrator`) containing the following **additional** permissions:
 
 *   **Source Project (Read-Only Delta):**
     *   `discoveryengine.collections.list` (Discover collections)
@@ -149,9 +103,9 @@ To allow them to extract resources from a **Source Project** and recreate them i
     *   `discoveryengine.agents.manage` (Execute Dialogflow agent bundle imports)
     *   `discoveryengine.agents.setIamPolicy` (Restore resource owner IAM bindings)
 *   **Quota Project (Quota & Billing):**
-    *   `serviceusage.services.use` (Assigned to the user on their own personal sandbox or developer project, which is then specified in the **Google User/Quota Project** settings field).
+    *   `serviceusage.services.use` (Required to use API quota headers).
 
-You can provision the custom user role using the `gcloud` CLI:
+You can provision this custom role using the `gcloud` CLI:
 ```bash
 gcloud iam roles create customBackupMigrator \
     --project="YOUR_PROJECT_ID" \
@@ -161,20 +115,13 @@ gcloud iam roles create customBackupMigrator \
     --stage=GA
 ```
 
-#### 2. Admin Mode (System Configuration & Cloud Staging)
-Administrators configuring identity providers, client IDs, or checking bucket connections need:
-
+#### 2. Admin Mode (System Configuration)
+Administrators configuring identity providers or client IDs need:
 *   **Quota/Billing:** `serviceusage.services.use` (on the quota project)
-*   **GCS Staging (Optional):** If backing up configurations directly to a shared Google Cloud Storage bucket rather than local client downloads:
-    *   `storage.buckets.list` (Discover buckets)
-    *   `storage.objects.list` (Discover backups list)
-    *   `storage.objects.get` (Download backup file)
-    *   `storage.objects.create` (Upload backup file)
-    *   `storage.objects.delete` (Delete/prune backup files)
 
 ---
 
-## 6. Advanced Identity Provider Configuration (WIF)
+## 4. Workforce Identity Federation (WIF Setup)
 
 To allow users from Okta or Microsoft Entra ID to authenticate directly with Google Cloud APIs from their browser, you must configure a Workforce Identity Pool and OIDC Provider:
 
@@ -214,8 +161,8 @@ gcloud iam workforce-pools providers create-oidc YOUR_PROVIDER_ID \
 
 > [!IMPORTANT]
 > **PKCE Auth and Public Client Constraints**:
-> *   **No Client Secrets**: Because Single-Page Applications (SPAs) run entirely in the browser, they cannot securely hold a client secret. The WIF provider must be configured as a public client (omit the `--client-secret` flag when creating the provider). Under this flow, the client retrieves the OIDC **ID Token** directly from Okta/Entra ID and exchanges it with the Google Security Token Service (STS).
-> *   **Redirect URI Overlaps**: Entra ID does not allow overlapping redirect URIs across Web and SPA platforms. Ensure redirect URIs for the application are configured exclusively under the SPA platform settings.
+> *   **No Client Secrets**: Single-Page Applications (SPAs) cannot securely hold client secrets. Configure your WIF provider as a public client (omit the `--client-secret` flag when creating the provider). The frontend retrieves the OIDC ID Token directly from Okta/Entra ID and exchanges it with the Google Security Token Service (STS).
+> *   **Redirect URI Settings**: Entra ID does not allow overlapping redirect URIs across Web and SPA platforms. Redirect URIs for this application must be configured exclusively under the SPA platform settings.
 
 ### Step 3: Bind workforce identities to the custom role
 ```bash
@@ -226,48 +173,103 @@ gcloud projects add-iam-policy-binding "YOUR_PROJECT_ID" \
 
 ---
 
-## 7. Architecture & Network Topologies
+## 5. Environment Variables Reference
 
-### Component Interactions
+| Variable Name | Required | Default Value | Description |
+| :--- | :--- | :--- | :--- |
+| `VITE_ENABLE_ADMIN_MODE` | No | `false` | Enables administrative settings and environment mapping UI. |
+| `VITE_IDP_CHANGE_ENABLED` | No | `false` | Activates step-by-step account switching for cross-IDP migrations. |
+| `VITE_ENABLE_GOOGLE_IDP` | No | `true` | Enables standard Google Account login option. |
+| `VITE_GOOGLE_CLIENT_ID` | Yes (if Google IDP is on) | - | OAuth 2.0 Client ID for standard Google accounts authentication. |
+| `VITE_GOOGLE_USER_PROJECT` | No | - | Overrides default quota/billing project for standard Google login. |
+| `VITE_ENABLE_WIF_IDP` | No | `false` | Enables Workforce Identity Federation (Entra ID) login option. |
+| `VITE_ENABLE_OKTA_IDP` | No | `false` | Enables Okta Workforce Identity Federation login option. |
+| `VITE_LOG_LEVEL` | No | `INFO` | Adjusts browser logs verbosity (`DEBUG`, `INFO`, `WARN`, `ERROR`). |
+| `VITE_SOURCE_PROJECT` | No | - | Default Source GCP Project ID. |
+| `VITE_SOURCE_LOCATION` | No | `global` | Default Source Discovery Engine Location (e.g., `global`, `us`). |
+| `VITE_TARGET_PROJECT` | No | - | Default Target GCP Project ID. |
+| `VITE_TARGET_LOCATION` | No | `global` | Default Target Discovery Engine Location. |
+| `VITE_DATASTORE_MAPPING` | No | `{}` | JSON string mapping source datastores to targets. |
+| `VITE_COLLECTION_MAPPING` | No | `{}` | JSON string mapping source collections to targets. |
 
-```mermaid
-graph TD
-    subgraph Client ["Client Browser"]
-        Frontend["React SPA (Vite / Browser)"]
-        GAPI["gapi.js Client (GCP SDK)"]
-    end
-
-    subgraph Auth ["Authentication Services"]
-        GIS["Google Sign-In (accounts.google.com)"]
-        IdP["Azure Entra ID (login.microsoftonline.com)"]
-        STS["Google STS (sts.googleapis.com)"]
-    end
-
-    subgraph GoogleCloud ["Google Cloud API Endpoints"]
-        DE["Discovery Engine (*.discoveryengine.googleapis.com)"]
-        GCS["Cloud Storage (storage.googleapis.com)"]
-        CB["Cloud Build (cloudbuild.googleapis.com)"]
-    end
-
-    %% Network flows
-    Frontend -- "1. Google Login (HTTPS/443)" --> GIS
-    Frontend -- "2. Entra ID Login (HTTPS/443)" --> IdP
-    Frontend -- "3. Exchange STS Token (HTTPS/443)" --> STS
-    
-    Frontend -- "4. Fetch/Restore Agents & IAM (HTTPS/443)" --> DE
-    GAPI -- "5. GCS Upload/Download (HTTPS/443)" --> GCS
-    GAPI -- "6. Trigger builds & check logs (HTTPS/443)" --> CB
+### JSON Mapping Variables Example
+When configuring cross-environment migrations, specify mappings as escaped JSON strings:
+```env
+VITE_DATASTORE_MAPPING='{"old-ds-id":"new-ds-id"}'
+VITE_COLLECTION_MAPPING='{"old-col-id":"new-col-id"}'
 ```
 
-### Network Endpoints & Ports
+---
 
-| Source | Destination | Hostname / URL | Port | Protocol | Purpose |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| User Browser | App Host (Vite Dev) | `localhost` | 5173 | HTTP | Local frontend development server |
-| User Browser | App Ingress | `backup.ge-dufrin.com` | 443 | HTTPS | Production application entry point |
-| User Browser | Google Sign-in | `accounts.google.com` | 443 | HTTPS | Client Google authentication |
-| User Browser | Microsoft Entra | `login.microsoftonline.com` | 443 | HTTPS | Client WIF/OIDC identity provider login |
-| User Browser | Google STS | `sts.googleapis.com` | 443 | HTTPS | Exchanging ID provider tokens for GCP access tokens |
-| User Browser | GCS API | `storage.googleapis.com` | 443 | HTTPS | Directly listing and downloading GCS assets |
-| User Browser | Cloud Build API | `cloudbuild.googleapis.com` | 443 | HTTPS | Directly tracking agent build details and logs |
-| User Browser | Discovery Engine | `*.discoveryengine.googleapis.com` | 443 | HTTPS | Bulk retrieval and creation of agent/engine configurations |
+## 6. Installation & Quick Start (Local Running)
+
+### Step 1: Clone the Repository
+```bash
+git clone <repository_url>
+cd Backup_Restore_App
+```
+
+### Step 2: Install Dependencies
+```bash
+npm install
+```
+
+### Step 3: Configure Local Environment
+Create a `.env` file in the root directory:
+```bash
+cp .env.example .env
+```
+Fill in your Google Client ID:
+```env
+VITE_ENABLE_GOOGLE_IDP=true
+VITE_GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
+VITE_ENABLE_ADMIN_MODE=true
+```
+
+### Step 4: Run the Application
+Launch the Vite development server:
+```bash
+npm run dev
+```
+Open `http://localhost:5173`.
+
+---
+
+## 7. Production Deployment Guide
+
+### Container Build
+Build a static web server Docker image:
+```bash
+docker build -t gcr.io/YOUR_PROJECT_ID/backup-restore-app:latest .
+```
+
+### Option A: Cloud Run Deployment
+```bash
+gcloud run deploy backup-restore-app \
+    --image gcr.io/YOUR_PROJECT_ID/backup-restore-app:latest \
+    --platform managed \
+    --port 8080 \
+    --allow-unauthenticated \
+    --set-env-vars="ALLOWED_ORIGINS=https://your-cloud-run-url.run.app,ALLOWED_EMAIL_DOMAIN=your-org-domain.com"
+```
+
+### Option B: GKE Deployment
+1. Edit [kubernetes/deployment.yaml](file:///usr/local/google/home/wdufrin/Documents/Code/Backup_Restore_App/kubernetes/deployment.yaml) to point to your container registry image path.
+2. Deploy manifests:
+   ```bash
+   kubectl apply -f kubernetes/
+   ```
+
+> [!NOTE]
+> **Container Host Security**: The container host acts strictly as a static web server. The container's runtime service account does **not** need any GCP IAM permissions, as all API interactions are authenticated via the end-user's browser credentials.
+
+---
+
+## 8. Troubleshooting & Operational Guidance
+
+| Symptom / Error | Potential Cause | Resolution |
+| :--- | :--- | :--- |
+| **`403: serviceuse.services.use` missing** | The active user credentials lack the permission to make calls billed to the target project. | Provide the `serviceusage.services.use` permission, or set `VITE_GOOGLE_USER_PROJECT` in your `.env` or settings modal to point to a sandbox project where the user has usage permissions. |
+| **WIF Sign-In Error: Origin Mismatch (400)** | The Authorized Redirect URI in Entra ID or Okta does not match the active host of the SPA. | Check the identity provider settings and ensure `http://localhost:5173` (development) or `https://backup.ge-dufrin.com` (production) is registered as an SPA redirect URI. |
+| **`ReferenceError: indexedDB is not defined`** | The application is running in an environment where IndexedDB is blocked or disabled (such as certain Incognito browser modes). | Run the application in a secure, non-incognito browser tab, or verify that browser cookies/site data are not blocked for the domain. |
+| **Restore Failed: datastore not found** | Target project has not provisioned the matching datastore structure. | Verify that datastores are created on the target, and ensure mapping variables (`VITE_DATASTORE_MAPPING`) are correctly set in the admin view. |

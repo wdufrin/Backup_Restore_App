@@ -1036,23 +1036,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
   const [logs, setLogs] = useState<string[]>([]);
   const [progress, setProgress] = useState<{ percent: number; text: string } | null>(null);
   
-  // GCS State
-  const [buckets, setBuckets] = useState<GcsBucket[]>([]);
-  const [selectedBucket, setSelectedBucket] = useState<string>('');
-  const [, setIsLoadingBuckets] = useState(false);
-  
-  // Available Backup Files (Keyed by section prefix)
-  const [backupFiles, setBackupFiles] = useState<Record<string, any[]>>({});
 
-  const [, setIsLoadingFiles] = useState(false);
-
-  const [modalData, setModalData] = useState<{
-    section: string;
-    title: string;
-    items: any[];
-    processor: (data: any) => Promise<void>;
-    originalData: any;
-  } | null>(null);
 
   const [chatHistoryArchiveData, setChatHistoryArchiveData] = useState<{ sessions: any[]; fileName: string } | null>(null);
 
@@ -1348,8 +1332,6 @@ const BackupPage: React.FC<BackupPageProps> = ({
     }));
     setApps([]);
     setReasoningEngines([]);
-    setBuckets([]);
-    setSelectedBucket('');
   };
   
   const addLog = (message: string) => {
@@ -1360,85 +1342,6 @@ const BackupPage: React.FC<BackupPageProps> = ({
   };
 
   // --- Effects to fetch dropdown data ---
-  
-  // Fetch GCS Buckets
-  useEffect(() => {
-      if (!apiConfig.projectId) return;
-      const fetchBuckets = async () => {
-          setIsLoadingBuckets(true);
-          setBuckets([]);
-          try {
-              const res = await api.listBuckets(apiConfig.projectId);
-              const items = res.items || [];
-              setBuckets(items);
-              if (items.length > 0) {
-                  // Default to first bucket if not set
-                  if (!selectedBucket) setSelectedBucket(items[0].name);
-              }
-          } catch (e) {
-              console.error("Failed to fetch buckets", e);
-          } finally {
-              setIsLoadingBuckets(false);
-          }
-      };
-      fetchBuckets();
-  }, [apiConfig.projectId]);
-
-  const fetchBackups = async () => {
-      if (!selectedBucket || !apiConfig.projectId) return;
-      setIsLoadingFiles(true);
-      setBackupFiles({}); // Clear while loading
-      try {
-          const res = await api.listGcsObjects(selectedBucket, '', apiConfig.projectId);
-          const objects = res.items || [];
-          
-          // Categorize files based on prefixes
-        const categorized: Record<string, any[]> = {
-          'Agents': [],
-          'NotebookLM': [],
-        };
-
-        objects.forEach((obj: any) => {
-          const name = obj.name;
-          let sourceApp = "N/A";
-          let region = "N/A";
-          
-          const parts = name.split('__');
-          if (parts.length >= 4) {
-            sourceApp = parts[1];
-            region = parts[2];
-          } else if (name.startsWith('agentspace-agents')) {
-            // Fallback for old format
-            const oldParts = name.split('-');
-            if (oldParts.length >= 4) {
-              sourceApp = oldParts[2];
-            }
-          }
-          
-          const fileObj = { filename: name, sourceApp, region };
-          
-          if (name.startsWith('agentspace-agents')) categorized['Agents'].push(fileObj);
-          else if (name.startsWith('agentspace-notebooks')) categorized['NotebookLM'].push(fileObj);
-        });
-
-        // Sort chronologically (names contain ISO timestamp, so alphabetical reverse works)
-        Object.keys(categorized).forEach(key => {
-            categorized[key].sort((a: any, b: any) => b.filename.localeCompare(a.filename));
-        });
-
-          setBackupFiles(categorized);
-      } catch (e) {
-          console.error("Failed to list objects", e);
-          addLog(`Error listing backup files: ${(e as any).message}`);
-      } finally {
-          setIsLoadingFiles(false);
-      }
-  };
-
-  // Fetch Backup Files when bucket changes
-  useEffect(() => {
-      fetchBackups();
-  }, [selectedBucket, apiConfig.projectId]);
 
 
   useEffect(() => {
@@ -1574,24 +1477,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
   }, [apiConfig.projectId, apiConfig.reasoningEngineLocation]);
 
 
-  const uploadBackupToGcs = async (data: object, filenamePrefix: string, useTimestamp: boolean = true) => {
-      if (!selectedBucket) {
-          throw new Error("No GCS bucket selected for backup.");
-      }
-      const jsonString = JSON.stringify(data, null, 2);
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = useTimestamp 
-        ? `${filenamePrefix}__${timestamp}.json`
-        : `${filenamePrefix}.json`;
-      const file = new File([jsonString], filename, { type: 'application/json' });
-      
-      addLog(`Uploading backup to gs://${selectedBucket}/${filename}...`);
-      await api.uploadFileToGcs(selectedBucket, filename, file, apiConfig.projectId);
-      addLog(`Upload successful.`);
-      
-      // Refresh file list to show the new backup
-      await fetchBackups();
-  };
+
   
   const executeOperation = async (section: string, operation: () => Promise<void>) => {
       setIsLoading(true);
@@ -1612,127 +1498,13 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
       }
   };
 
-  const handleDownloadGcsFile = async (filename: string) => {
-    if (!selectedBucket) return;
-    executeOperation('DownloadFile', async () => {
-      addLog(`Downloading file: gs://${selectedBucket}/${filename}...`);
-      const fileContent = await api.getGcsObjectContent(selectedBucket, filename, apiConfig.projectId);
-      const blob = new Blob([fileContent], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      addLog(`Download triggered.`);
-    });
-  };
 
-
-
-  const handleViewGcsFile = async (filename: string) => {
-    if (!selectedBucket) return;
-    executeOperation('ViewFile', async () => {
-      addLog(`Fetching content for: gs://${selectedBucket}/${filename}...`);
-      const fileContent = await api.getGcsObjectContent(selectedBucket, filename, apiConfig.projectId);
-      setViewModalData({ filename, content: fileContent });
-      addLog(`Content fetched.`);
-    });
-  };
-
-  const handleDeleteGcsFile = async (filename: string) => {
-    if (!selectedBucket) return;
-    if (!window.confirm(`Are you sure you want to delete backup file: ${filename}?`)) return;
-    executeOperation('DeleteFile', async () => {
-      addLog(`Deleting backup file: gs://${selectedBucket}/${filename}...`);
-      await api.deleteGcsObject(selectedBucket, filename, apiConfig.projectId);
-      addLog(`File deleted successfully.`);
-      fetchBackups(); // Refresh the list
-    });
-  };
 
 
 
   // --- Backup Handlers ---
 
-  const handleBackupAgents = async () => executeOperation('BackupAgents', async () => {
-    if (!apiConfig.appId) {
-      throw new Error("Gemini Enterprise ID must be set to back up agents.");
-    }
-    addLog(`Starting server-side backup for agents in Assistant: ${apiConfig.assistantId}...`);
-    
-    const result = await api.backupAgentsServerSide({ ...apiConfig, accessToken }, logLevel);
-    if (result.logs) {
-      result.logs.forEach((log: string) => addLog(`  [Server] ${log}`));
-    }
-    const lowCodeAgents: Agent[] = result.agents || [];
 
-    let agentsToSave = lowCodeAgents;
-    if (activeTab === 'user') {
-      if (userTabConfig.bypassOwnerFilter) {
-        addLog(`  - User Tab: Bypassing WIF owner filtering (migrating all agents in the selected app context).`);
-      } else {
-        agentsToSave = lowCodeAgents.filter((agent: any) => isAgentOwnedByUser(agent, userEmail, userSub, poolId));
-        addLog(`  - User Tab: Filtered down to ${agentsToSave.length} agents owned by you.`);
-      }
-    }
-    
-    const backupData = { type: 'Agents', createdAt: new Date().toISOString(), sourceConfig: apiConfig, agents: agentsToSave };
-    await uploadBackupToGcs(backupData, `agentspace-agents__${apiConfig.appId || 'N/A'}__${apiConfig.appLocation}`);
-    addLog(`Backup complete! Found ${agentsToSave.length} agents.`);
-  });
-
-
-  const handleBackupNotebooks = async () => executeOperation('BackupNotebookLM', async () => {
-    addLog(`Starting backup for Notebooks in ${apiConfig.appLocation}...`);
-    const response = await api.listNotebooks(apiConfig);
-    const notebooks = response.notebooks || [];
-
-    addLog(`Found ${notebooks.length} notebooks. Fetching detailed sources...`);
-    const fullNotebooks = [];
-
-    for (const nb of notebooks) {
-      const notebookId = nb.name.split('/').pop()!;
-      try {
-        const rawNotebook = await api.getNotebook(apiConfig, notebookId);
-
-
-
-        // Loop through the sources to pull full metadata
-        const fullSources = [];
-        for (const source of (rawNotebook.sources || [])) {
-          const sourceId = source.name.split('/').pop()!;
-          try {
-            const fullSource = await api.getNotebookSource(apiConfig, notebookId, sourceId);
-            fullSources.push(fullSource);
-          } catch (sourceErr: any) {
-            addLog(`  - Warning: Could not fetch details for source ${sourceId} in notebook ${notebookId}: ${sourceErr.message}`);
-            fullSources.push(source); // Fallback to shallow copy
-          }
-        }
-        rawNotebook.sources = fullSources;
-        fullNotebooks.push(rawNotebook);
-        addLog(`  - Fetched details for: ${rawNotebook.displayName || notebookId} (${fullSources.length} sources)`);
-      } catch (nbErr: any) {
-        addLog(`  - Error fetching details for notebook ${notebookId}: ${nbErr.message}`);
-      }
-      await delay(500); // Rate limit
-    }
-
-    let notebooksToSave = fullNotebooks;
-    if (activeTab === 'user') {
-      notebooksToSave = fullNotebooks.filter((nb: any) => {
-        return nb.metadata?.userRole === 'PROJECT_ROLE_OWNER';
-      });
-      addLog(`  - User Tab: Filtered down to ${notebooksToSave.length} notebooks owned by you.`);
-    }
-
-    const backupData = { type: 'NotebookLM', createdAt: new Date().toISOString(), sourceConfig: apiConfig, notebooks: notebooksToSave };
-    await uploadBackupToGcs(backupData, `agentspace-notebooks__${apiConfig.appId || 'N/A'}__${apiConfig.appLocation}`);
-    addLog(`Backup complete! Found ${notebooksToSave.length} fully resolved NotebookLMs.`);
-  });
 
   const handleUserBackupCombined = async () => executeOperation('BackupUserData', async () => {
     addLog(`Starting combined backup for user: ${userEmail}...`);
@@ -3082,83 +2854,6 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
 
 
 
-  const handleRestore = async (section: string, processor: (data: any) => Promise<void>, filename: string) => {
-    if (!filename || !selectedBucket) {
-      setError(`Please select a bucket and a backup file for ${section}.`);
-      return;
-    }
-    
-    const sectionName = section.replace(/[A-Z]/g, ' $&').trim(); // e.g., 'DiscoveryResources' -> 'Discovery Resources'
-    executeOperation(`Restore${section}`, async () => {
-      addLog(`Downloading file: gs://${selectedBucket}/${filename}...`);
-      
-      const fileContent = await api.getGcsObjectContent(selectedBucket, filename, apiConfig.projectId);
-      const backupData = JSON.parse(fileContent);
-      
-      if (backupData.type !== section) {
-        // Allow backward compatibility or relaxed checking if needed, but for now strict.
-        // Actually, some backups might be old format?
-        // ChatHistory backups have type 'ChatHistory'.
-        throw new Error(`Invalid backup file type. Expected '${section}', but found '${backupData.type}'.`);
-      }
-
-      if (section === 'ChatHistory') {
-        // Special handling for Chat History: Open Archive Viewer
-        const sessions = [
-          ...(backupData.discoverySessions || []),
-          ...(backupData.reasoningSessions || [])
-        ];
-        setChatHistoryArchiveData({ sessions, fileName: filename });
-        addLog(`Opened Chat History Archive Viewer for ${filename}.`);
-      } else {
-        await processor(backupData);
-      }
-
-      addLog(`Restore process for ${sectionName} finished.`);
-    });
-  };
-
-  const handleConfirmRestore = (section: string, items: any[], processor: (data: any) => Promise<void>, originalData: any) => {
-    setModalData(null); // Close the modal first
-
-    const sectionName = section.replace(/[A-Z]/g, ' $&').trim();
-    executeOperation(`Restore${section}`, async () => {
-      let dataToRestore = { ...originalData };
-      
-      // Filter the original data based on the selected items
-      switch (section) {
-          case 'DiscoveryResources':
-              dataToRestore.collections = originalData.collections.filter((c: Collection) => items.some(item => item.name === c.name));
-              break;
-          case 'ReasoningEngine':
-              // It's a single item select for now
-              dataToRestore.engine = items.length > 0 ? items[0] : null; 
-              break;
-          case 'Assistant':
-              dataToRestore.assistant.agents = originalData.assistant.agents.filter((a: Agent) => items.some(item => item.name === a.name));
-              break;
-          case 'Agents':
-              dataToRestore.agents = originalData.agents.filter((a: Agent) => items.some(item => item.name === a.name));
-              break;
-          case 'DataStores':
-              dataToRestore.dataStores = originalData.dataStores.filter((ds: DataStore) => items.some(item => item.name === ds.name));
-              break;
-          case 'Authorizations':
-              dataToRestore.authorizations = originalData.authorizations.filter((auth: Authorization) => items.some(item => item.name === auth.name));
-              break;
-        case 'NotebookLM':
-          dataToRestore.notebooks = originalData.notebooks.filter((nb: any) => items.some(item => item.name === nb.name));
-          break;
-          default:
-              throw new Error(`Unknown section type for selective restore: ${section}`);
-      }
-      
-      addLog(`Starting restore of ${items.length} selected ${sectionName}...`);
-      await processor(dataToRestore);
-      addLog(`Restore process for ${sectionName} finished.`);
-    });
-  };
-
   const restoreAgentsIntoAssistant = async (agents: Agent[], restoreConfig: typeof apiConfig, sourceConfig?: any) => {
     addLog(`  - Starting server-side restore of ${agents.length} agent(s)...`);
     try {
@@ -3182,109 +2877,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
 
 
   
-  const processRestoreAgents = async (backupData: any) => {
-    const { agents } = backupData;
-    if (!agents) {
-        addLog("No agent data found in the backup.");
-        return;
-    }
 
-    const restoreConfig = { ...apiConfig, accessToken };
-    if (!restoreConfig.appId) {
-        throw new Error("You must select a target Gemini Enterprise in the configuration before restoring agents.");
-    }
-
-    const filteredAgents = agents.filter((agent: any) => {
-      let owner = "N/A";
-      if (agent.iamPolicy && agent.iamPolicy.bindings) {
-        const ownerBinding = agent.iamPolicy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
-        if (ownerBinding && ownerBinding.members && ownerBinding.members.length > 0) {
-          owner = getOwnerFromBinding(ownerBinding.members[0]);
-        }
-      }
-      
-      return owner === userEmail;
-    });
-
-    const itemsWithTypes = filteredAgents.map((agent: any) => {
-      let agentType = "Low Code";
-      if (agent.adkAgentDefinition) agentType = "ADK";
-      else if (agent.a2aAgentDefinition) agentType = "A2A";
-      
-      return { ...agent, agentType: agentType, disabled: false, disabledReason: undefined };
-    });
-
-    setModalData({
-        section: 'Agents',
-        title: 'Select Agents to Restore',
-      items: itemsWithTypes,
-        originalData: backupData,
-        processor: async (data) => {
-            await restoreAgentsIntoAssistant(data.agents, restoreConfig, backupData.sourceConfig);
-        },
-    });
-  };
-
-
-
-  const processRestoreNotebooks = async (backupData: any) => {
-    if (!backupData.notebooks || backupData.notebooks.length === 0) {
-      addLog("No notebooks found in backup file to restore.");
-      return;
-    }
-
-    const displayableNotebooks = backupData.notebooks.map((notebook: any) => ({
-      ...notebook,
-      displayName: notebook.displayName || notebook.title || notebook.name?.split('/').pop() || 'Unnamed Notebook'
-    }));
-
-    setModalData({
-      section: 'NotebookLM',
-      title: 'Select Notebooks to Restore',
-      items: displayableNotebooks,
-      originalData: { ...backupData, notebooks: displayableNotebooks },
-      processor: async (data) => {
-        addLog(`Restoring ${data.notebooks.length} Notebooks...`);
-        for (const notebook of data.notebooks) {
-          addLog(`  - Restoring Notebook '${notebook.displayName}'...`);
-
-          // Construct a clean payload
-          const { name, displayName, createTime, updateTime, sources, disabled, disabledReason, agentType, ...rest } = notebook;
-          const payload: any = { ...rest };
-
-          if (notebook.displayName || notebook.title) {
-            payload.title = notebook.displayName || notebook.title;
-          }
-
-          try {
-            const newNotebook = await api.createNotebook(apiConfig, payload);
-            const newNotebookId = newNotebook.name.split('/').pop()!;
-            addLog(`    - CREATED: Notebook '${newNotebookId}'`);
-
-            // Restore sources
-            if (notebook.sources && notebook.sources.length > 0) {
-              const sourceRequests = notebook.sources.filter(isRestorableSource).map(mapSourceToPayload);
-              
-              if (sourceRequests.length > 0) {
-                addLog(`    - Restoring ${sourceRequests.length} supported sources for notebook '${newNotebookId}'...`);
-                try {
-                  await api.batchCreateNotebookSources(apiConfig, newNotebookId, sourceRequests);
-                  addLog(`      - SUCCESS: Batch created ${sourceRequests.length} sources.`);
-                } catch (srcErr: any) {
-                  addLog(`      - ERROR: Failed to batch create sources for notebook '${newNotebookId}': ${srcErr.message}`);
-                }
-              } else {
-                addLog(`    - No restorable sources found for notebook '${newNotebookId}' (skipping local files).`);
-              }
-            }
-          } catch (err: any) {
-            addLog(`    - ERROR: Failed to create notebook '${notebook.displayName}': ${err.message}`);
-          }
-          await delay(2000); // Rate limit between notebooks
-        }
-      }
-    });
-  };
 
   const promptForSecret = (auth: Authorization, customMessage?: string): Promise<string | null> => {
     return new Promise((resolve) => {
@@ -3308,16 +2901,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
   
 
 
-  const cardConfigs: Array<{
-    section: string;
-    title: string;
-    scope: 'Global' | 'User Specific';
-    backupHandler: () => Promise<void>;
-    restoreProcessor: (data: any) => Promise<void>;
-  }> = [
-      { section: 'Agents', title: 'Agents', scope: 'Global', backupHandler: handleBackupAgents, restoreProcessor: processRestoreAgents },
-      { section: 'NotebookLM', title: 'NotebookLMs', scope: 'User Specific', backupHandler: handleBackupNotebooks, restoreProcessor: processRestoreNotebooks },
-  ];
+
 
   const selectedSourceApp = sourceApps.find(app => app.name.split('/').pop() === userTabConfig.sourceAppId);
   const allowedSourceDsIds = selectedSourceApp?.dataStoreIds || [];
@@ -3623,17 +3207,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           config={apiConfig}
         />
       )}
-      {modalData && (
-        <RestoreSelectionModal
-          isOpen={!!modalData}
-          onClose={() => setModalData(null)}
-          onConfirm={(selectedItems) => handleConfirmRestore(modalData.section, selectedItems, modalData.processor, modalData.originalData)}
-          title={modalData.title}
-          items={modalData.items}
-          isLoading={isLoading}
-          showIdInput={false}
-        />
-      )}
+
       {secretPrompt && (
         <ClientSecretPrompt
           isOpen={!!secretPrompt}
