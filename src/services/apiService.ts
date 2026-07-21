@@ -1270,6 +1270,39 @@ export const batchCreateNotebookSources = async (config: Config, notebookId: str
     return gapiRequest<any>(url, 'POST', projectId, undefined, payload, config.accessToken ? { 'Authorization': `Bearer ${config.accessToken}` } : undefined);
 };
 
+export const listNotes = async (config: Config, notebookId: string) => {
+    const { projectId, appLocation } = config;
+    const baseUrl = getDiscoveryEngineUrl(appLocation);
+    // API: v1alpha/projects/{project}/locations/{location}/notebooks/{notebookId}/notes:batchGet
+    const url = `${baseUrl}/v1alpha/projects/${projectId}/locations/${appLocation}/notebooks/${notebookId}/notes:batchGet`;
+    return gapiRequest<any>(url, 'GET', projectId, undefined, undefined, config.accessToken ? { 'Authorization': `Bearer ${config.accessToken}` } : undefined);
+};
+
+export const createNote = async (config: Config, notebookId: string, payload: any) => {
+    const { projectId, appLocation } = config;
+    const baseUrl = getDiscoveryEngineUrl(appLocation);
+    // API: v1alpha/projects/{project}/locations/{location}/notebooks/{notebookId}/notes
+    const url = `${baseUrl}/v1alpha/projects/${projectId}/locations/${appLocation}/notebooks/${notebookId}/notes`;
+    return gapiRequest<any>(url, 'POST', projectId, undefined, payload, config.accessToken ? { 'Authorization': `Bearer ${config.accessToken}` } : undefined);
+};
+
+export const listArtifacts = async (config: Config, notebookId: string) => {
+    const { projectId, appLocation } = config;
+    const baseUrl = getDiscoveryEngineUrl(appLocation);
+    // API: v1alpha/projects/{project}/locations/{location}/notebooks/{notebookId}/artifacts
+    const url = `${baseUrl}/v1alpha/projects/${projectId}/locations/${appLocation}/notebooks/${notebookId}/artifacts`;
+    return gapiRequest<any>(url, 'GET', projectId, undefined, undefined, config.accessToken ? { 'Authorization': `Bearer ${config.accessToken}` } : undefined);
+};
+
+export const createArtifact = async (config: Config, notebookId: string, payload: any) => {
+    const { projectId, appLocation } = config;
+    const baseUrl = getDiscoveryEngineUrl(appLocation);
+    // API: v1alpha/projects/{project}/locations/{location}/notebooks/{notebookId}/artifacts
+    const url = `${baseUrl}/v1alpha/projects/${projectId}/locations/${appLocation}/notebooks/${notebookId}/artifacts`;
+    return gapiRequest<any>(url, 'POST', projectId, undefined, payload, config.accessToken ? { 'Authorization': `Bearer ${config.accessToken}` } : undefined);
+};
+
+
 // Workforce Identity Pools
 export const validateWorkforcePool = async (poolName: string, config: Config) => {
     // poolName should be full resource name: locations/{location}/workforcePools/{pool_id}

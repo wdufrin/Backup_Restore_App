@@ -75,45 +75,18 @@ To comply with enterprise security requirements, this application implements a *
 ## 3. System Requirements & IAM Setup
 
 ### Minimum IAM Permissions
-API interactions are authenticated using the active OAuth credentials of the end-user. Users executing backup and restore operations need standard Discovery Engine roles combined with specific custom permissions.
+API interactions are authenticated using the active OAuth credentials of the end-user. Users executing backup and restore operations need standard Discovery Engine roles:
 
-#### 1. User Mode (Least-Privilege Migrations)
-For standard users executing backup and restore operations, it is assumed they already have the default **Discovery Engine User** role (`roles/discoveryengine.user`). 
+1. **Backup Operations (Source Project)**
+   * **Required Role**: **Discovery Engine User** (`roles/discoveryengine.user`)
+   * **Purpose**: Allows the client to view and download playbooks, notebooks, datastores, notes, and generated artifacts (slides/briefings).
 
-Create a custom IAM role (`customBackupMigrator`) containing the following **additional** permissions:
+2. **Restore Operations (Target Project)**
+   * **Required Role**: **Discovery Engine Editor** (`roles/discoveryengine.editor`) or **Discovery Engine Admin** (`roles/discoveryengine.admin`)
+   * **Purpose**: Allows the client to create notebooks, upload text/metadata sources, write restored notes, and trigger artifact regeneration.
 
-*   **Source Project (Read-Only Delta):**
-    *   `discoveryengine.collections.list` (Discover collections)
-    *   `discoveryengine.engines.list` (Discover search apps)
-    *   `discoveryengine.datastores.list` (Discover datastores)
-    *   `discoveryengine.dataConnectors.get` (Read sync schedules/configs)
-    *   `discoveryengine.assistants.list` (Discover chat assistants)
-    *   `discoveryengine.assistants.get` (Read assistant templates)
-    *   `discoveryengine.notebooks.get` (Read playbook details)
-    *   `discoveryengine.agents.getIamPolicy` (Export agent IAM policy)
-*   **Target Project (Write/Create Delta):**
-    *   *Includes all Source Project Read-Only Delta permissions above*, plus:
-    *   `discoveryengine.engines.create` (Provision search apps)
-    *   `discoveryengine.engines.update` (Update search apps configuration)
-    *   `discoveryengine.datastores.create` (Provision datastores)
-    *   `discoveryengine.datastores.update` (Update datastore settings/schemas)
-    *   `discoveryengine.dataConnectors.create` (Create sync connectors)
-    *   `discoveryengine.dataConnectors.update` (Update connector settings)
-    *   `discoveryengine.assistants.create` (Create chat assistants)
-    *   `discoveryengine.agents.manage` (Execute Dialogflow agent bundle imports)
-    *   `discoveryengine.agents.setIamPolicy` (Restore resource owner IAM bindings)
-*   **Quota Project (Quota & Billing):**
-    *   `serviceusage.services.use` (Required to use API quota headers).
-
-You can provision this custom role using the `gcloud` CLI:
-```bash
-gcloud iam roles create customBackupMigrator \
-    --project="YOUR_PROJECT_ID" \
-    --title="Discovery Engine Backup Migrator Delta" \
-    --description="Additional permissions needed on top of roles/discoveryengine.user to perform backups and restores." \
-    --permissions="discoveryengine.collections.list,discoveryengine.engines.list,discoveryengine.datastores.list,discoveryengine.dataConnectors.get,discoveryengine.assistants.list,discoveryengine.assistants.get,discoveryengine.notebooks.get,discoveryengine.agents.getIamPolicy,discoveryengine.engines.create,discoveryengine.engines.update,discoveryengine.datastores.create,discoveryengine.datastores.update,discoveryengine.dataConnectors.create,discoveryengine.dataConnectors.update,discoveryengine.assistants.create,discoveryengine.agents.manage,discoveryengine.agents.setIamPolicy" \
-    --stage=GA
-```
+3. **Quota/Billing Project**
+   * **Required Permission**: `serviceusage.services.use` on the billing/quota project (to authenticate API calls).
 
 #### 2. Admin Mode (System Configuration)
 Administrators configuring identity providers or client IDs need:

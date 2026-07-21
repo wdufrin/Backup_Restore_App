@@ -101,19 +101,33 @@ interface BackupPageProps {
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-const isRestorableSource = (source: any): boolean => {
-  // Skip if it's identified as a local file or unsupported source
-  if (source.metadata?.agentspaceMetadata) {
-    return false;
+const extractTextFromTailwindDoc = (doc: any): string => {
+  if (!doc || !doc.body || !doc.body.content) return '';
+  let text = '';
+  for (const block of doc.body.content) {
+    if (block.paragraph && block.paragraph.elements) {
+      for (const element of block.paragraph.elements) {
+        if (element.textRun && element.textRun.content) {
+          text += element.textRun.content;
+        }
+      }
+    }
   }
-  
-  // Keep if it's a supported link
+  return text;
+};
+
+const isRestorableSource = (source: any): boolean => {
+  // Allow all supported link/doc types, including local files (agentspaceMetadata)
   return !!(
     source.metadata?.googleDocsMetadata ||
     source.metadata?.youtubeMetadata ||
     source.metadata?.webpageMetadata ||
+    source.metadata?.agentspaceMetadata ||
     source.url ||
-    source.webScrapeConfig
+    source.webScrapeConfig ||
+    source.content ||
+    source.text ||
+    source.tailwindDoc
   );
 };
 
@@ -132,9 +146,18 @@ const mapSourceToPayload = (source: any) => {
       youtubeUrl: source.metadata.youtubeMetadata.youtubeUrl || source.metadata.youtubeMetadata.uri || source.metadata.youtubeMetadata.url
     };
   } else if (source.metadata?.agentspaceMetadata) {
-    sourcePayload.agentspaceContent = {
-      documentName: source.metadata.agentspaceMetadata.documentName
-    };
+    // If the file's text content is already stored/extracted, recreate it as text content
+    const extractedText = source.content || source.text || extractTextFromTailwindDoc(source.tailwindDoc);
+    if (extractedText) {
+      sourcePayload.textContent = {
+        sourceName: sourceName,
+        content: extractedText
+      };
+    } else {
+      sourcePayload.agentspaceContent = {
+        documentName: source.metadata.agentspaceMetadata.documentName
+      };
+    }
   } else if (source.metadata?.webpageMetadata || source.webScrapeConfig || source.url) {
     sourcePayload.webContent = {
       sourceName: sourceName,
@@ -144,7 +167,7 @@ const mapSourceToPayload = (source: any) => {
     // Fallback to minimal text content if unidentifiable or unsupported
     sourcePayload.textContent = {
       sourceName: sourceName,
-      content: source.content || source.text || `[Restored Source: ${source.name || sourceName}]`
+      content: source.content || source.text || extractTextFromTailwindDoc(source.tailwindDoc) || `[Restored Source: ${source.name || sourceName}]`
     };
   }
   return sourcePayload;
@@ -1588,8 +1611,9 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               return;
             }
 
+                        const fullAgent = await api.getAgent(agent.name, sourceConfig);
             const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
-            const agentWithPolicy = { ...agent, iamPolicy: policy, agentType: 'Low Code' };
+            const agentWithPolicy = { ...fullAgent, iamPolicy: policy, agentType: 'Low Code' };
             const isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId);
             (agentWithPolicy as any).category = isOwned ? 'core' : 'optional';
             userAgents.push(agentWithPolicy);
@@ -1602,8 +1626,14 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               }
               if (isLowCode) {
                 addLog(`  - Warning: Failed to backup IAM policy for agent ${agent.name}: ${(e as any).message}`);
-                const agentCopy = { ...agent, category: 'optional' };
-                userAgents.push(agentCopy);
+                try {
+                  const fullAgent = await api.getAgent(agent.name, sourceConfig);
+                  const agentCopy = { ...fullAgent, category: 'optional' };
+                  userAgents.push(agentCopy);
+                } catch {
+                  const agentCopy = { ...agent, category: 'optional' };
+                  userAgents.push(agentCopy);
+                }
               }
             } else {
               addLog(`  - Warning: Failed to backup agent ${agent.displayName || agent.name} due to view/policy fetch error: ${(e as any).message}. Skipping agent.`);
@@ -1650,7 +1680,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           }
 
           if (isOwned) {
-            // Fetch sources
+                        // Fetch sources
             const fullSources = [];
             for (const source of (rawNotebook.sources || [])) {
               const sourceId = source.name.split('/').pop()!;
@@ -1662,6 +1692,43 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               }
             }
             rawNotebook.sources = fullSources;
+
+            // Fetch notes
+            const fullNotes = [];
+            try {
+              const notesResponse = await api.listNotes(sourceConfig, notebookId);
+              if (notesResponse && notesResponse.notes) {
+                for (const entry of notesResponse.notes) {
+                  if (entry.note) {
+                    fullNotes.push(entry.note);
+                  }
+                }
+              }
+              if (isDebugMode && fullNotes.length > 0) {
+                addLog(`[DEBUG] Fetched ${fullNotes.length} notes for notebook ${notebookId}`);
+              }
+            } catch (notesErr: any) {
+              addLog(`  - Warning: Failed to fetch notes for notebook ${notebookId}: ${notesErr.message}`);
+            }
+            rawNotebook.notes = fullNotes;
+            
+            // Fetch artifacts
+            const fullArtifacts = [];
+            try {
+              const artifactsResponse = await api.listArtifacts(sourceConfig, notebookId);
+              if (artifactsResponse && artifactsResponse.artifacts) {
+                for (const artifact of artifactsResponse.artifacts) {
+                  fullArtifacts.push(artifact);
+                }
+              }
+              if (isDebugMode && fullArtifacts.length > 0) {
+                addLog(`[DEBUG] Fetched ${fullArtifacts.length} artifacts for notebook ${notebookId}`);
+              }
+            } catch (artErr: any) {
+              addLog(`  - Warning: Failed to fetch artifacts for notebook ${notebookId}: ${artErr.message}`);
+            }
+            rawNotebook.artifacts = fullArtifacts;
+
             userNotebooks.push(rawNotebook);
           }
         } catch (nbErr: any) {
@@ -1892,8 +1959,9 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               }
             }
 
+                        const fullAgent = await api.getAgent(agent.name, sourceConfig);
             const enrichedAgent = { 
-              ...agent, 
+              ...fullAgent, 
               agentType: 'Low Code',
               iamPolicy: policy
             };
@@ -1943,8 +2011,9 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               let hasOwner = false;
               let agentWithPolicy: any = { ...agent };
               try {
+                const fullAgent = await api.getAgent(agent.name, sourceConfig);
                 const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
-                agentWithPolicy = { ...agent, iamPolicy: policy };
+                agentWithPolicy = { ...fullAgent, iamPolicy: policy };
                 
                 isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId);
                 
@@ -1958,7 +2027,12 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                 fullBackupAgents.push(agentWithPolicy);
               } catch (policyErr: any) {
                 addLog(`    - Warning: Failed to fetch IAM policy for fallback: ${policyErr.message}`);
-                fullBackupAgents.push(agent);
+                try {
+                  const fullAgent = await api.getAgent(agent.name, sourceConfig);
+                  fullBackupAgents.push(fullAgent);
+                } catch {
+                  fullBackupAgents.push(agent);
+                }
               }
 
               // Only show WIF user-owned agents OR shared/unowned agents (no explicit owner)
@@ -2301,13 +2375,106 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               const newNotebookId = newNotebook.name.split('/').pop()!;
               addLog(`  - Created Notebook: ${newNotebookId}`);
 
+                            const sourceIdMap: Record<string, string> = {};
               if (nb.sources && nb.sources.length > 0) {
-                const sourceRequests = nb.sources.filter(isRestorableSource).map(mapSourceToPayload);
+                const restorableSources = nb.sources.filter(isRestorableSource);
+                const sourceRequests = restorableSources.map(mapSourceToPayload);
                 if (sourceRequests.length > 0) {
-                  await api.batchCreateNotebookSources(targetConfig, newNotebookId, sourceRequests);
-                  addLog(`    - Restored ${sourceRequests.length} sources.`);
+                  try {
+                    const response = await api.batchCreateNotebookSources(targetConfig, newNotebookId, sourceRequests);
+                    const createdSources = response?.sources || [];
+                    for (let idx = 0; idx < restorableSources.length; idx++) {
+                      const oldSource = restorableSources[idx];
+                      const oldId = oldSource.name.split('/').pop()!;
+                      const newSource = createdSources[idx];
+                      if (newSource) {
+                        const newId = newSource.name.split('/').pop()!;
+                        sourceIdMap[oldId] = newId;
+                      }
+                    }
+                    addLog(`    - Restored ${sourceRequests.length} sources.`);
+                  } catch (srcErr: any) {
+                    addLog(`    - Error creating sources: ${srcErr.message}`);
+                  }
                 } else {
-                  addLog(`    - No restorable sources found (skipping local files).`);
+                  addLog(`    - No restorable sources found.`);
+                }
+              }
+
+              // Restore Notes
+              if (nb.notes && nb.notes.length > 0) {
+                let notesRestoredCount = 0;
+                for (const note of nb.notes) {
+                  try {
+                    const notePayload = {
+                      title: note.title || '',
+                      content: note.content || '',
+                      metadata: note.metadata || undefined,
+                      tailwindDocContent: note.tailwindDocContent || undefined
+                    };
+                    await api.createNote(targetConfig, newNotebookId, notePayload);
+                    notesRestoredCount++;
+                  } catch (noteErr: any) {
+                    addLog(`    - Warning: Failed to restore note "${note.title || 'Untitled'}": ${noteErr.message}`);
+                  }
+                }
+                if (notesRestoredCount > 0) {
+                  addLog(`    - Restored ${notesRestoredCount} note(s).`);
+                }
+              }
+
+              // Restore Artifacts (regenerate)
+              if (nb.artifacts && nb.artifacts.length > 0) {
+                let artifactsRestoredCount = 0;
+                for (const artifact of nb.artifacts) {
+                  try {
+                    // Rewrite top-level sources to the new source IDs
+                    const newSources = (artifact.sources || []).map((src: any) => {
+                      const oldId = src.sourceId?.id || src.sourceId;
+                      const newId = sourceIdMap[oldId];
+                      return {
+                        sourceId: {
+                          id: newId || oldId
+                        }
+                      };
+                    });
+
+                    // Rewrite sourceIds inside audioOverview if present
+                    let audioOverview = undefined;
+                    if (artifact.audioOverview) {
+                      const oldSourceIds = artifact.audioOverview.generationOptions?.sourceIds || [];
+                      const newSourceIds = oldSourceIds.map((srcIdObj: any) => {
+                        const oldId = srcIdObj.id || srcIdObj;
+                        return { id: sourceIdMap[oldId] || oldId };
+                      });
+                      audioOverview = {
+                        ...artifact.audioOverview,
+                        generationOptions: {
+                          ...artifact.audioOverview.generationOptions,
+                          sourceIds: newSourceIds
+                        }
+                      };
+                    }
+
+                    const artifactPayload = {
+                      title: artifact.title || '',
+                      type: artifact.type,
+                      sources: newSources,
+                      audioOverview: audioOverview,
+                      tailoredReport: artifact.tailoredReport || undefined,
+                      explainerVideo: artifact.explainerVideo || undefined,
+                      app: artifact.app || undefined,
+                      infographic: artifact.infographic || undefined,
+                      slides: artifact.slides || undefined
+                    };
+                    await api.createArtifact(targetConfig, newNotebookId, artifactPayload);
+                    artifactsRestoredCount++;
+                  } catch (artErr: any) {
+                    addLog(`    - Warning: Failed to recreate artifact "${artifact.title || 'Untitled'}": ${artErr.message}`);
+                  }
+                }
+                if (artifactsRestoredCount > 0) {
+                  addLog(`    - Triggered regeneration for ${artifactsRestoredCount} artifact(s).`);
                 }
               }
             } catch (nbErr: any) {
@@ -2409,9 +2576,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           const localFiles: string[] = [];
           if (nb.sources && nb.sources.length > 0) {
             for (const source of nb.sources) {
-              if (source.metadata?.agentspaceMetadata) {
-                localFiles.push(source.metadata.agentspaceMetadata.documentName || source.title || 'Unnamed File');
-              } else if (!source.metadata?.googleDocsMetadata && !source.metadata?.youtubeMetadata && !source.metadata?.webpageMetadata && !source.url && !source.webScrapeConfig) {
+              if (!isRestorableSource(source)) {
                 localFiles.push(source.title || source.displayName || 'Unsupported Source');
               }
             }

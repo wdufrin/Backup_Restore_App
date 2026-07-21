@@ -28,6 +28,7 @@ Object.defineProperty(window, 'sessionStorage', { value: mockSessionStorage, wri
 vi.mock('../services/apiService', () => {
   return {
     listResources: vi.fn(() => Promise.resolve({ agents: [], engines: [] })),
+    getAgent: vi.fn(() => Promise.resolve({ name: 'projects/test-project/locations/global/agents/agent-1', displayName: 'Test Agent 1' })),
     getAgentView: vi.fn(() => Promise.resolve({ agentView: {} })),
     getAgentIamPolicy: vi.fn(() => Promise.resolve({ bindings: [] })),
     listNotebooks: vi.fn(() => Promise.resolve({ notebooks: [] })),
@@ -36,6 +37,8 @@ vi.mock('../services/apiService', () => {
     getUserInfo: vi.fn(() => Promise.resolve({ sub: '123' })),
     listReasoningEngines: vi.fn(() => Promise.resolve({ reasoningEngines: [] })),
     createNotebook: vi.fn(() => Promise.resolve({ name: 'projects/test/locations/global/notebooks/new-nb-1' })),
+    listNotes: vi.fn(() => Promise.resolve({ notes: [] })),
+    createNote: vi.fn(() => Promise.resolve({ name: 'new-note-1' })),
   };
 });
 
@@ -274,7 +277,7 @@ describe('BackupPage Component - Env, Inputs & Outputs', () => {
     expect(screen.getByText(/My Notebook 1/i)).toBeInTheDocument();
 
     // Click restore confirmation button
-    const confirmRestoreBtn = screen.getByRole('button', { name: /Restore 1 Item\(s\)/i });
+    const confirmRestoreBtn = await screen.findByRole('button', { name: /Restore 1 Item\(s\)/i });
     fireEvent.click(confirmRestoreBtn);
 
     // Verify it called createNotebook API with payload
