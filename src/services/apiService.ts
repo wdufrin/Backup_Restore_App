@@ -1537,6 +1537,7 @@ export const restoreAgentsServerSide = async (
       for (const key of definitionKeys) {
         let definition = payload[key];
         if (definition) {
+          definition = JSON.parse(JSON.stringify(definition));
           if (definition.session) {
             delete definition.session;
           }

@@ -116,6 +116,16 @@ const extractTextFromTailwindDoc = (doc: any): string => {
   return text;
 };
 
+const downloadTextFile = (filename: string, content: string) => {
+  const element = document.createElement("a");
+  const file = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+  element.href = URL.createObjectURL(file);
+  element.download = filename;
+  document.body.appendChild(element);
+  element.click();
+  document.body.removeChild(element);
+};
+
 const isRestorableSource = (source: any): boolean => {
   // Allow all supported link/doc types, including local files (agentspaceMetadata)
   return !!(
@@ -454,6 +464,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
     bypassOwnerFilter?: boolean;
     enableAgentViewFallback?: boolean;
     forceDownloadBackup?: boolean;
+    autoConvertFailedNotes?: boolean;
   }
 
   const [userTabConfig, setUserTabConfig] = useState<UserTabConfig>(() => {
@@ -470,6 +481,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
       bypassOwnerFilter: import.meta.env.VITE_BYPASS_OWNER_FILTER === 'true',
       enableAgentViewFallback: import.meta.env.VITE_ENABLE_AGENT_VIEW_FALLBACK !== 'false', // Default to true
       forceDownloadBackup: import.meta.env.VITE_FORCE_DOWNLOAD_BACKUP === 'true',
+      autoConvertFailedNotes: import.meta.env.VITE_AUTO_CONVERT_FAILED_NOTES === 'true', // Default to false
     };
   });
   const [isUserConfigModalOpen, setIsUserConfigModalOpen] = useState(false);
@@ -829,7 +841,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
     content += `# --- Migration Settings ---\n`;
     content += `VITE_MIGRATE_AGENTS=${shouldMigrateAgents}\n`;
     content += `VITE_MIGRATE_NOTEBOOKS=${shouldMigrateNotebooks}\n`;
-    content += `VITE_FORCE_DOWNLOAD_BACKUP=${userTabConfig.forceDownloadBackup || false}\n\n`;
+    content += `VITE_FORCE_DOWNLOAD_BACKUP=${userTabConfig.forceDownloadBackup || false}\n`;
+    content += `VITE_AUTO_CONVERT_FAILED_NOTES=${userTabConfig.autoConvertFailedNotes !== false}\n\n`;
 
     content += `# --- Mappings ---\n`;
     content += `VITE_DATASTORE_MAPPING='${JSON.stringify(datastoreMapping)}'\n`;
@@ -1031,6 +1044,10 @@ const BackupPage: React.FC<BackupPageProps> = ({
       targetAppId: base.VITE_TARGET_APP_ID || '',
       targetAppUrl: base.VITE_TARGET_APP_URL || '',
       targetCid: base.VITE_TARGET_CID || '',
+      bypassOwnerFilter: base.VITE_BYPASS_OWNER_FILTER === 'true',
+      enableAgentViewFallback: base.VITE_ENABLE_AGENT_VIEW_FALLBACK !== 'false',
+      forceDownloadBackup: base.VITE_FORCE_DOWNLOAD_BACKUP === 'true',
+      autoConvertFailedNotes: base.VITE_AUTO_CONVERT_FAILED_NOTES === 'true',
     });
     setFeatureFlags({
       idpChangeEnabled: base.VITE_IDP_CHANGE_ENABLED === 'true',
@@ -1118,8 +1135,11 @@ const BackupPage: React.FC<BackupPageProps> = ({
     knowledgeAttachments?: string[];
     localFiles?: string[];
     agentFiles?: string[];
-    failedNotes?: string[];
-    failedArtifacts?: string[];
+    failedNotes?: { title: string; content?: string }[];
+    failedArtifacts?: { title: string; type?: string; content?: string }[];
+    sourcesStatus?: { title: string; status: 'restored' | 'failed' | 'manual'; error?: string }[];
+    notesStatus?: { title: string; status: 'restored' | 'fallback_source' | 'failed'; error?: string }[];
+    artifactsStatus?: { title: string; status: 'restored' | 'fallback_source' | 'failed'; error?: string }[];
   }
 
   const [manualActionReport, setManualActionReport] = useState<ManualActionReportItem[]>([]);
@@ -1634,9 +1654,33 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               return;
             }
 
-                        const fullAgent = await api.getAgent(agent.name, sourceConfig);
+            const fullAgent = await api.getAgent(agent.name, sourceConfig);
             const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
-            const agentWithPolicy = { ...fullAgent, iamPolicy: policy, agentType: 'Low Code' };
+            
+            const agentFiles: string[] = [];
+            const connections = (fullAgent as any).dataStoreConnections || [];
+            for (const conn of connections) {
+              if (conn.dataStore) {
+                const dsId = conn.dataStore.split('/').pop();
+                if (dsId && (dsId.startsWith('agent-files-') || dsId.includes('-agent-files-'))) {
+                  try {
+                    const dsPath = conn.dataStore.substring(conn.dataStore.indexOf('projects/'));
+                    const docsRes = await api.listDocuments(dsPath, sourceConfig);
+                    const docs = docsRes.documents || [];
+                    for (const doc of docs) {
+                      const name = doc.displayName || doc.content?.uri?.split('/').pop() || doc.id;
+                      if (name) {
+                        agentFiles.push(name);
+                      }
+                    }
+                  } catch (docErr: any) {
+                    addLog(`  - Warning: Failed to query documents for agent datastore ${dsId}: ${docErr.message}`);
+                  }
+                }
+              }
+            }
+
+            const agentWithPolicy = { ...fullAgent, iamPolicy: policy, agentType: 'Low Code', agentFiles };
             const isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId);
             (agentWithPolicy as any).category = isOwned ? 'core' : 'optional';
             userAgents.push(agentWithPolicy);
@@ -2387,13 +2431,23 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
 
         const failedNotes: any[] = [];
         const failedArtifacts: any[] = [];
+        const notebookStatusesMap: Record<string, any> = {};
 
         // 1. Restore Agents
+        let agentRestoreLogs: string[] = [];
         if (filteredAgents.length > 0) {
           setProgress({ percent: 10, text: `Restoring ${filteredAgents.length} agents...` });
           addLog(`Restoring ${filteredAgents.length} agents to ${targetConfig.appId}...`);
-          await restoreAgentsIntoAssistant(filteredAgents, targetConfig, pendingBackupData.sourceConfig);
+          agentRestoreLogs = await restoreAgentsIntoAssistant(filteredAgents, targetConfig, pendingBackupData.sourceConfig);
         }
+
+        const failedAgentShareIds: string[] = [];
+        agentRestoreLogs.forEach(log => {
+          const match = log.match(/Warning: Failed to apply IAM policy for agent ([a-zA-Z0-9_-]+):/);
+          if (match) {
+            failedAgentShareIds.push(match[1]);
+          }
+        });
 
         // 2. Restore Notebooks
         if (filteredNotebooks.length > 0) {
@@ -2447,6 +2501,11 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               const fallbackSourcePayloads: any[] = [];
               const notebookFailedNotes: any[] = [];
               const notebookFailedArtifacts: any[] = [];
+              
+              const notebookSourcesStatus: { title: string; status: 'restored' | 'failed' | 'manual'; error?: string }[] = [];
+              const notebookNotesStatus: { title: string; status: 'restored' | 'fallback_source' | 'failed'; error?: string }[] = [];
+              const notebookArtifactsStatus: { title: string; status: 'restored' | 'fallback_source' | 'failed'; error?: string }[] = [];
+
               if (nb.sources && nb.sources.length > 0) {
                 const restorableSources = nb.sources.filter(isRestorableSource);
                 const sourceRequests = restorableSources.map(mapSourceToPayload);
@@ -2468,12 +2527,23 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                       }
                     }
                     addLog(`    - Restored ${sourceRequests.length} sources.`);
+                    restorableSources.forEach((s: any) => {
+                      notebookSourcesStatus.push({ title: s.title || s.displayName || 'Restored Source', status: 'restored' });
+                    });
                   } catch (srcErr: any) {
                     addLog(`    - Error creating sources: ${srcErr.message}`);
+                    restorableSources.forEach((s: any) => {
+                      notebookSourcesStatus.push({ title: s.title || s.displayName || 'Restored Source', status: 'failed', error: srcErr.message });
+                    });
                   }
                 } else {
                   addLog(`    - No restorable sources found.`);
                 }
+                
+                const nonRestorableSources = nb.sources.filter((s: any) => !isRestorableSource(s));
+                nonRestorableSources.forEach((s: any) => {
+                  notebookSourcesStatus.push({ title: s.title || s.displayName || 'Unsupported Source', status: 'manual' });
+                });
               }
 
               // Restore Notes
@@ -2495,9 +2565,11 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                     };
                     await api.createNote(targetConfig, newNotebookId, notePayload);
                     notesRestoredCount++;
+                    notebookNotesStatus.push({ title: note.title || 'Untitled Note', status: 'restored' });
                   } catch (noteErr: any) {
                     addLog(`    - Warning: Failed to restore note "${note.title || 'Untitled'}": ${noteErr.message}`);
                     notebookFailedNotes.push(note);
+                    notebookNotesStatus.push({ title: note.title || 'Untitled Note', status: 'failed', error: noteErr.message });
                     const noteText = note.content || extractTextFromTailwindDoc(note.tailwindDocContent || note.tailwindDoc);
                     fallbackSourcePayloads.push({
                       textContent: {
@@ -2570,9 +2642,11 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                     };
                     await api.createArtifact(targetConfig, newNotebookId, artifactPayload);
                     artifactsRestoredCount++;
+                    notebookArtifactsStatus.push({ title: artifact.title || 'Untitled Artifact', status: 'restored' });
                   } catch (artErr: any) {
                     addLog(`    - Warning: Failed to recreate artifact "${artifact.title || 'Untitled'}": ${artErr.message}`);
                     notebookFailedArtifacts.push(artifact);
+                    notebookArtifactsStatus.push({ title: artifact.title || 'Untitled Artifact', status: 'failed', error: artErr.message });
                     const artText = artifact.tailoredReport?.content || artifact.content || extractTextFromTailwindDoc(artifact.tailwindDocContent);
                     if (artText) {
                       fallbackSourcePayloads.push({
@@ -2596,16 +2670,33 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               }
 
               if (fallbackSourcePayloads.length > 0) {
-                addLog(`  - Whitelist bypass: uploading ${fallbackSourcePayloads.length} notes/artifacts as text sources...`);
-                try {
-                  await api.batchCreateNotebookSources(targetConfig, newNotebookId, fallbackSourcePayloads);
-                  addLog(`    - Successfully restored ${fallbackSourcePayloads.length} notes/artifacts as text sources.`);
-                  notebookFailedNotes.length = 0;
-                  notebookFailedArtifacts.length = 0;
-                } catch (fallbackErr: any) {
-                  addLog(`    - Error uploading fallback sources: ${fallbackErr.message}`);
+                if (userTabConfig.autoConvertFailedNotes) {
+                  addLog(`  - Whitelist bypass: uploading ${fallbackSourcePayloads.length} notes/artifacts as text sources...`);
+                  try {
+                    await api.batchCreateNotebookSources(targetConfig, newNotebookId, fallbackSourcePayloads);
+                    addLog(`    - Successfully restored ${fallbackSourcePayloads.length} notes/artifacts as text sources.`);
+                    notebookFailedNotes.length = 0;
+                    notebookFailedArtifacts.length = 0;
+                    
+                    notebookNotesStatus.forEach(n => {
+                      if (n.status === 'failed') n.status = 'fallback_source';
+                    });
+                    notebookArtifactsStatus.forEach(a => {
+                      if (a.status === 'failed') a.status = 'fallback_source';
+                    });
+                  } catch (fallbackErr: any) {
+                    addLog(`    - Error uploading fallback sources: ${fallbackErr.message}`);
+                  }
+                } else {
+                  addLog(`  - Whitelist bypass: skipped fallback conversion to text sources (disabled by user configuration).`);
                 }
               }
+
+              notebookStatusesMap[cleanTitle] = {
+                sources: notebookSourcesStatus,
+                notes: notebookNotesStatus,
+                artifacts: notebookArtifactsStatus
+              };
             } catch (nbErr: any) {
               addLog(`  - Error restoring notebook ${nb.name}: ${nbErr.message}`);
             }
@@ -2670,19 +2761,21 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             }
           }
 
-          const agentFiles: string[] = [];
+          const agentFiles: string[] = (agent as any).agentFiles || [];
           
-          // Find definition keys (like workflowAgentDefinition) that contain the files
-          const definitionKeys = Object.keys(agent).filter(key => key.toLowerCase().includes('agentdefinition'));
-          
-          for (const key of definitionKeys) {
-            const definition = (agent as any)[key];
-            if (definition) {
-              const files = definition.deployedAgentFiles || definition.agentFiles;
-              if (files && files.length > 0) {
-                for (const file of files) {
-                  if (file.fileName) {
-                    agentFiles.push(file.fileName);
+          if (agentFiles.length === 0) {
+            // Find definition keys (like workflowAgentDefinition) that contain the files
+            const definitionKeys = Object.keys(agent).filter(key => key.toLowerCase().includes('agentdefinition'));
+            
+            for (const key of definitionKeys) {
+              const definition = (agent as any)[key];
+              if (definition) {
+                const files = definition.deployedAgentFiles || definition.agentFiles;
+                if (files && files.length > 0) {
+                  for (const file of files) {
+                    if (file.fileName) {
+                      agentFiles.push(file.fileName);
+                    }
                   }
                 }
               }
@@ -2731,8 +2824,16 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           }
 
           const nbTitle = nb.title || nb.displayName || 'Unnamed Notebook';
-          const nbFailedNotes = failedNotes.find(fn => fn.title === nbTitle)?.notes.map((n: any) => n.title || 'Untitled Note') || [];
-          const nbFailedArtifacts = failedArtifacts.find(fa => fa.title === nbTitle)?.artifacts.map((a: any) => a.title || 'Untitled Artifact') || [];
+          const nbFailedNotes = failedNotes.find(fn => fn.title === nbTitle)?.notes.map((n: any) => ({
+            title: n.title || 'Untitled Note',
+            content: n.content || ''
+          })) || [];
+          const nbFailedArtifacts = failedArtifacts.find(fa => fa.title === nbTitle)?.artifacts.map((a: any) => ({
+            title: a.title || 'Untitled Artifact',
+            type: a.type || 'Document',
+            content: a.tailoredReport?.content || a.content || ''
+          })) || [];
+          const status = notebookStatusesMap[nbTitle];
 
           report.push({
             notebookTitle: nbTitle,
@@ -2740,6 +2841,9 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             localFiles: localFiles,
             failedNotes: nbFailedNotes,
             failedArtifacts: nbFailedArtifacts,
+            sourcesStatus: status?.sources || [],
+            notesStatus: status?.notes || [],
+            artifactsStatus: status?.artifacts || []
           });
         }
         
@@ -3036,7 +3140,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
 
     // Step 4: Sharing
     const step4AgentItems = restoredAgents.filter(item => item.sharedWith && item.sharedWith.length > 0);
-    const step4NotebookItems = restoredNotebooks.filter(item => item.sharedWith && item.sharedWith.length > 0);
+    const step4NotebookItems = restoredNotebooks;
 
     if (step4AgentItems.length > 0 || step4NotebookItems.length > 0) {
       children.push(
@@ -3063,6 +3167,18 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             }),
           ],
           spacing: { after: 100 },
+        }),
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: "⚠️ NOTE FOR NOTEBOOKS: Because the Google Cloud NotebookLM API does not expose private collaborator lists, the restore tool cannot automatically migrate notebook access. Please check your original notebooks and manually reshare them in the target project.",
+              size: 20,
+              color: "D97706",
+              font: "Calibri",
+              bold: true
+            }),
+          ],
+          spacing: { after: 120 },
         })
       );
 
@@ -3125,25 +3241,23 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           })
         );
 
-        if (nb.sharedWith && nb.sharedWith.length > 0) {
-          const isPlaceholder = nb.sharedWith.includes("UNKNOWN_SHARED_USERS_PLACEHOLDER");
-          children.push(
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: isPlaceholder 
-                    ? "     * ⚠️ WARNING: This notebook was shared in the source project, but the Notebook API does not expose the list of shared users. Please check your source notebook and manually share this notebook in the target project."
-                    : "     * Share with: " + nb.sharedWith.join(", "),
-                  size: 20,
-                  color: isPlaceholder ? "D97706" : "6B46C1",
-                  font: "Calibri",
-                  bold: isPlaceholder
-                }),
-              ],
-              spacing: { after: 40 },
-            })
-          );
-        }
+        const hasSharedUsers = nb.sharedWith && nb.sharedWith.length > 0 && !nb.sharedWith.includes("UNKNOWN_SHARED_USERS_PLACEHOLDER");
+        children.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: hasSharedUsers 
+                  ? "     * Share with: " + nb.sharedWith.join(", ")
+                  : "     * ⚠️ NOTE: The Notebook API does not expose private collaborator lists. If this notebook was shared in the source project, please manually document and reshare it in the target project.",
+                size: 20,
+                color: hasSharedUsers ? "6B46C1" : "D97706",
+                font: "Calibri",
+                bold: !hasSharedUsers
+              }),
+            ],
+            spacing: { after: 40 },
+          })
+        );
       });
     }
 
@@ -3173,7 +3287,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
 
 
 
-  const restoreAgentsIntoAssistant = async (agents: Agent[], restoreConfig: typeof apiConfig, sourceConfig?: any) => {
+  const restoreAgentsIntoAssistant = async (agents: Agent[], restoreConfig: typeof apiConfig, sourceConfig?: any): Promise<string[]> => {
     addLog(`  - Starting server-side restore of ${agents.length} agent(s)...`);
     try {
       const result = await api.restoreAgentsServerSide(
@@ -3188,6 +3302,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
         result.logs.forEach((log: string) => addLog(`  [Server] ${log}`));
       }
       addLog(`  - Server-side restore of agents completed successfully.`);
+      return result.logs || [];
     } catch (err: any) {
       addLog(`  - ERROR: Server-side restore of agents failed: ${err.message}`);
       throw err;
@@ -3252,7 +3367,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
     if (!isRestoreComplete) {
       return (
         <p className="text-xs text-gray-600">
-          After restore completes, manual steps required to finalize your agents will appear here.
+          After restore completes, manual steps required to finalize your restoration will appear here.
         </p>
       );
     }
@@ -3260,7 +3375,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
     const restoredAgents = manualActionReport.filter(item => item.agentName);
     const restoredNotebooks = manualActionReport.filter(item => item.notebookTitle);
 
-    // Step 3 items
+    // Filter missing file/upload items
     const step3AgentItems = restoredAgents.filter(item => 
       (item.knowledgeAttachments && item.knowledgeAttachments.length > 0) || 
       (item.agentFiles && item.agentFiles.length > 0) ||
@@ -3272,9 +3387,25 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
       (item.failedArtifacts && item.failedArtifacts.length > 0)
     );
 
-    // Step 4 items: only show items that are shared with at least one user
+    // Sharing items (Always populate from backup shared list)
     const step4AgentItems = restoredAgents.filter(item => item.sharedWith && item.sharedWith.length > 0);
-    const step4NotebookItems = restoredNotebooks.filter(item => item.sharedWith && item.sharedWith.length > 0);
+    const step4NotebookItems = restoredNotebooks;
+
+    const hasManualSteps = 
+      step3AgentItems.length > 0 ||
+      step3NotebookItems.length > 0 ||
+      step4AgentItems.length > 0 ||
+      step4NotebookItems.length > 0 ||
+      restoredAgents.length > 0;
+
+    if (!hasManualSteps) {
+      return (
+        <div className="flex items-center gap-2 p-4 bg-green-50 dark:bg-slate-800/50 rounded-xl border border-green-200 dark:border-slate-700 text-green-700 dark:text-green-300 text-xs font-semibold font-sans">
+          <span className="text-sm">✓</span>
+          <span>All items successfully restored! No manual actions required to finalize.</span>
+        </div>
+      );
+    }
 
     return (
       <div className="space-y-6 text-xs text-gray-800 dark:text-gray-200 font-sans">
@@ -3282,60 +3413,12 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           Please complete the following manual steps to finalize your restoration.
         </p>
 
-        {/* Step 1: Publish */}
-        {restoredAgents.length > 0 && (
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm space-y-3">
-            <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-              <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-[10px] font-bold">1</span>
-              Step 1: Publish Restored Agents
-            </h3>
-            <p className="text-gray-500 text-[11px]">
-              Restored agents are imported in <strong>Draft</strong> mode. You must deploy and publish each agent to make them live.
-            </p>
-            <div className="space-y-2 pt-1">
-              {restoredAgents.map((agent, idx) => (
-                <div key={idx} className="flex items-start gap-2 bg-gray-50 dark:bg-slate-800 p-2 rounded-lg border border-gray-100 dark:border-slate-700">
-                  <input type="checkbox" className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
-                  <div>
-                    <p className="font-semibold text-gray-900 dark:text-white">Publish Agent: "{agent.agentName}"</p>
-                    <p className="text-[10px] text-gray-500">Navigate to the agent console and click <strong>Deploy/Publish</strong>.</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Step 2: Update Agent Configurations */}
-        {restoredAgents.length > 0 && (
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm space-y-3">
-            <h3 className="text-sm font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-2">
-              <span className="flex items-center justify-center w-5 h-5 rounded-full bg-indigo-100 text-indigo-600 text-[10px] font-bold">2</span>
-              Step 2: Update Agent Configurations
-            </h3>
-            <p className="text-gray-500 text-[11px]">
-              Verify and update configuration settings for the restored agents to ensure proper functioning.
-            </p>
-            <div className="space-y-2 pt-1">
-              {restoredAgents.map((agent, idx) => (
-                <div key={idx} className="flex items-start gap-2 bg-gray-50 dark:bg-slate-800 p-2 rounded-lg border border-gray-100 dark:border-slate-700">
-                  <input type="checkbox" className="mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer" />
-                  <div>
-                    <p className="font-semibold text-gray-900 dark:text-white">Verify Config for Agent: "{agent.agentName}"</p>
-                    <p className="text-[10px] text-gray-500">Check and update the system instructions, model, and tool parameters.</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Step 3: Add Missing Files */}
+        {/* Step 1: Add back missing files for notebooks and agents */}
         {(step3AgentItems.length > 0 || step3NotebookItems.length > 0) && (
           <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm space-y-3">
             <h3 className="text-sm font-bold text-amber-600 dark:text-amber-400 flex items-center gap-2">
-              <span className="flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-600 text-[10px] font-bold">3</span>
-              Step 3: Add Missing Files & Binds
+              <span className="flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-600 text-[10px] font-bold">1</span>
+              Step 1: Add back missing files for Notebooks and Agents
             </h3>
             <p className="text-gray-500 text-[11px]">
               Re-upload local knowledge files and verify datastore mappings that could not be automatically resolved.
@@ -3379,48 +3462,87 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               ))}
 
               {step3NotebookItems.map((nb, idx) => (
-                <div key={idx} className="bg-gray-50 dark:bg-slate-800 p-3 rounded-lg border border-gray-100 dark:border-slate-700 space-y-2">
+                <div key={idx} className="bg-gray-50 dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-750 space-y-3 font-sans">
                   <div className="flex items-start gap-2">
-                    <input type="checkbox" className="mt-0.5 rounded border-gray-300 text-amber-600 focus:ring-amber-500 cursor-pointer" />
+                    <input type="checkbox" className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
                     <div>
-                      <p className="font-semibold text-gray-900 dark:text-white">Re-upload missing files for Notebook: "{nb.notebookTitle}"</p>
+                      <p className="font-semibold text-gray-900 dark:text-white text-xs">Finalize Notebook: "{nb.notebookTitle}"</p>
+                      <p className="text-[10px] text-gray-500 dark:text-slate-400">Some items could not be automatically copied. Follow these simple steps to finalize:</p>
                     </div>
                   </div>
-                  <div className="pl-6 text-gray-500 space-y-2">
+
+                  <div className="pl-6 space-y-3.5 text-[11px] text-gray-700 dark:text-slate-350">
+                    {/* Local files needing upload */}
                     {nb.localFiles && nb.localFiles.length > 0 && (
-                      <div>
-                        <p className="font-semibold text-[10px] text-amber-700 mb-0.5">Local Files to re-upload:</p>
-                        <div className="flex flex-wrap gap-1">
-                          {nb.localFiles.map((file, fIdx) => (
-                            <span key={fIdx} className="px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded text-[10px] font-medium font-sans">
-                              {file}
-                            </span>
+                      <div className="space-y-1">
+                        <p className="font-bold text-[10px] text-gray-800 dark:text-slate-200">Re-upload local source files:</p>
+                        <ul className="list-disc pl-4 space-y-1 text-gray-600 dark:text-slate-450 leading-relaxed">
+                          {nb.localFiles.map((file: string, fIdx: number) => (
+                            <li key={fIdx}>
+                              Upload <span className="font-semibold text-gray-900 dark:text-white">"{file}"</span> using the <span className="font-semibold">+ Add source</span> button in NotebookLM.
+                            </li>
                           ))}
-                        </div>
+                        </ul>
                       </div>
                     )}
+
+                    {/* Notes needing recreation */}
                     {nb.failedNotes && nb.failedNotes.length > 0 && (
-                      <div>
-                        <p className="font-semibold text-[10px] text-red-650 dark:text-red-400 mb-0.5">Failed Notes (Please manually recreate inside notebook):</p>
-                        <div className="flex flex-col gap-1 pl-1">
-                          {nb.failedNotes.map((noteTitle, nIdx) => (
-                            <span key={nIdx} className="text-[10px] text-red-700 dark:text-red-300 font-medium">
-                              • {noteTitle}
-                            </span>
+                      <div className="space-y-1.5">
+                        <p className="font-bold text-[10px] text-gray-800 dark:text-slate-200">Recreate Notes:</p>
+                        <div className="space-y-2">
+                          {nb.failedNotes.map((note: any, nIdx: number) => (
+                            <div key={nIdx} className="bg-white dark:bg-slate-900 p-2.5 rounded-lg border border-gray-150 dark:border-slate-800/80 flex flex-col gap-1">
+                              <div className="flex items-center justify-between">
+                                <span className="font-semibold text-gray-900 dark:text-white">Note: "{note.title}"</span>
+                              </div>
+                              <p className="text-[10px] text-gray-500 dark:text-slate-450 leading-normal">
+                                Click <span className="font-semibold">+ Add note</span> in your target notebook, then copy & paste the content from your original notebook.
+                              </p>
+                            </div>
                           ))}
                         </div>
                       </div>
                     )}
+
+                    {/* Briefing docs and decks needing recreation */}
                     {nb.failedArtifacts && nb.failedArtifacts.length > 0 && (
-                      <div>
-                        <p className="font-semibold text-[10px] text-red-650 dark:text-red-400 mb-0.5">Failed Briefing Docs & Decks (Please manually regenerate):</p>
-                        <div className="flex flex-col gap-1 pl-1">
-                          {nb.failedArtifacts.map((artTitle, aIdx) => (
-                            <span key={aIdx} className="text-[10px] text-red-700 dark:text-red-300 font-medium">
-                              • {artTitle}
-                            </span>
+                      <div className="space-y-1.5">
+                        <p className="font-bold text-[10px] text-gray-800 dark:text-slate-200">Regenerate Briefing Docs & Decks:</p>
+                        <div className="space-y-2">
+                          {nb.failedArtifacts.map((art: any, aIdx: number) => (
+                            <div key={aIdx} className="bg-white dark:bg-slate-900 p-2.5 rounded-lg border border-gray-150 dark:border-slate-800/80 flex flex-col gap-1">
+                              <div className="flex items-center justify-between">
+                                <span className="font-semibold text-gray-900 dark:text-white">{art.type || 'Document'}: "{art.title}"</span>
+                                {art.content && (
+                                  <button
+                                    onClick={() => downloadTextFile(`${art.title || 'Document'}.md`, `# Artifact: ${art.title} (${art.type})\n\n${art.content}`)}
+                                    className="text-[10px] text-blue-600 hover:text-blue-700 underline font-semibold flex items-center gap-1 cursor-pointer font-sans"
+                                    title="Download original text content"
+                                  >
+                                    Download content (.md)
+                                  </button>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-gray-500 dark:text-slate-450 leading-normal">
+                                Open the <span className="font-semibold">Studio</span> panel on the right side of NotebookLM, select <span className="font-semibold">{art.type || 'Document'}</span>, and generate it.
+                              </p>
+                            </div>
                           ))}
                         </div>
+                      </div>
+                    )}
+                    
+                    {/* Sharing reminder */}
+                    {nb.sharedWith && nb.sharedWith.length > 0 && (
+                      <div className="bg-amber-50 dark:bg-slate-900/50 border border-amber-200 dark:border-slate-700/80 p-2.5 rounded-lg text-amber-800 dark:text-amber-300 text-[10px] space-y-1">
+                        <span className="font-bold flex items-center gap-1">
+                          <span>⚠️</span>
+                          <span>Notebook Sharing Required</span>
+                        </span>
+                        <p className="leading-normal">
+                          This notebook was shared in the source project. Since the NotebookLM API does not expose user sharing lists, please open your original notebook to see who it was shared with, and manually share this restored notebook in the target project.
+                        </p>
                       </div>
                     )}
                   </div>
@@ -3430,16 +3552,52 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           </div>
         )}
 
-        {/* Step 4: Sharing */}
+        {/* Step 2: Publish agents */}
+        {restoredAgents.length > 0 && (
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm space-y-3">
+            <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
+              <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-[10px] font-bold">2</span>
+              Step 2: Publish Restored Agents
+            </h3>
+            <p className="text-gray-500 text-[11px]">
+              Restored agents are imported in <strong>Draft</strong> mode. You must deploy/publish them and verify their configurations.
+            </p>
+            <div className="space-y-4 pt-1">
+              {restoredAgents.map((agent, idx) => (
+                <div key={idx} className="bg-gray-50 dark:bg-slate-800 p-3 rounded-lg border border-gray-100 dark:border-slate-700 space-y-2">
+                  <div className="flex items-start gap-2">
+                    <input type="checkbox" className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
+                    <div>
+                      <p className="font-semibold text-gray-900 dark:text-white">Publish Agent: "{agent.agentName}"</p>
+                      <p className="text-[10px] text-gray-500">Navigate to the agent console and click <strong>Deploy/Publish</strong>.</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-2 pl-6 pt-1 border-t border-gray-100 dark:border-slate-700">
+                    <input type="checkbox" className="mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer" />
+                    <div>
+                      <p className="font-semibold text-gray-900 dark:text-white text-xs">Verify Configurations</p>
+                      <p className="text-[10px] text-gray-500">Check and update the system instructions, model parameters, and tools.</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Step 3: Reshare agents and notebooks */}
         {(step4AgentItems.length > 0 || step4NotebookItems.length > 0) && (
           <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm space-y-3">
             <h3 className="text-sm font-bold text-purple-600 dark:text-purple-400 flex items-center gap-2">
-              <span className="flex items-center justify-center w-5 h-5 rounded-full bg-purple-100 text-purple-600 text-[10px] font-bold">4</span>
-              Step 4: Share & Restore Permissions
+              <span className="flex items-center justify-center w-5 h-5 rounded-full bg-purple-100 text-purple-600 text-[10px] font-bold">3</span>
+              Step 3: Reshare Agents and Notebooks
             </h3>
             <p className="text-gray-500 text-[11px]">
               Reshare the restored items with the appropriate team members or groups.
             </p>
+            <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900 rounded-lg p-2.5 text-[10.5px] text-amber-800 dark:text-amber-300">
+              <strong>Important Note for Notebooks:</strong> Because the Google Cloud NotebookLM API does not expose private collaborator lists, the restore tool cannot automatically migrate notebook access. Please check your original notebooks and manually reshare them in the target project.
+            </div>
             <div className="space-y-2 pt-1">
               {step4AgentItems.map((agent, idx) => (
                 <div key={idx} className="bg-gray-50 dark:bg-slate-800 p-3 rounded-lg border border-gray-100 dark:border-slate-700 space-y-2">
@@ -3489,8 +3647,8 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                         </div>
                       </div>
                     ) : (
-                      <p className="text-[10px] text-amber-600 font-semibold bg-amber-50 dark:bg-slate-700 dark:text-amber-400 p-1.5 rounded border border-amber-200 dark:border-slate-650">
-                        ⚠️ This notebook was shared in the source project. However, the Notebook API does not expose the list of shared users. Please check your source notebook and manually share this notebook in the target project.
+                      <p className="text-[10px] text-amber-600 font-semibold bg-amber-50 dark:bg-slate-800/50 dark:text-amber-400 p-1.5 rounded border border-amber-200 dark:border-slate-700">
+                        ⚠️ The Notebook API does not expose the list of shared users. If this notebook was shared in the source project, please manually document and reshare it in the target project.
                       </p>
                     )}
                   </div>
@@ -3500,11 +3658,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           </div>
         )}
 
-        {manualActionReport.length === 0 && (
-          <div className="text-center py-4 text-gray-500 text-sm">
-            No manual steps required! All items were successfully restored.
-          </div>
-        )}
+        {/* Empty state is handled early by hasManualSteps check */}
 
         <div className="mt-4">
           <button
@@ -3951,7 +4105,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                     )}
                   </div>
                 ) : (
-                  <div className="w-full max-w-md mb-4">
+                  <div className="w-full max-w-md mb-4 flex flex-col gap-3">
                     <label className="block text-sm font-medium text-gray-700 mb-2">Upload Backup File for Restore</label>
                     <input 
                       type="file" 
@@ -4077,7 +4231,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                   )}
 
                   {import.meta.env.VITE_SINGLE_CLICK_MIGRATION === 'true' ? (
-                    <div className="flex flex-col gap-4">
+                    <div className="flex flex-col gap-4 items-center w-full">
                       <div className="flex gap-6">
                         <button
                           onClick={handleSingleClickMigration}
@@ -4694,6 +4848,27 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                     </label>
                     <p className="text-[10px] text-gray-400 mt-0.5">
                       Saves the backup file to your local computer's downloads directory. Disabling this enables zero-download migrations using the browser cache only.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="adminAutoConvertFailedNotes" 
+                    checked={!!userTabConfig.autoConvertFailedNotes} 
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setUserTabConfig(prev => ({ ...prev, autoConvertFailedNotes: checked }));
+                    }}
+                    className="mt-0.5 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
+                  />
+                  <div>
+                    <label htmlFor="adminAutoConvertFailedNotes" className="text-xs text-gray-700 dark:text-white font-semibold cursor-pointer select-none">
+                      Auto-convert failed notes & briefing docs to text sources (NotebookLM bypass)
+                    </label>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      Automatically uploads failed notes/briefing docs as text sources to bypass private preview whitelist restrictions. Disabling this displays them as manual recreation tasks in Step 3.
                     </p>
                   </div>
                 </div>

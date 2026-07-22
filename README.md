@@ -164,6 +164,13 @@ gcloud projects add-iam-policy-binding "YOUR_PROJECT_ID" \
 | `VITE_TARGET_LOCATION` | No | `global` | Default Target Discovery Engine Location. |
 | `VITE_DATASTORE_MAPPING` | No | `{}` | JSON string mapping source datastores to targets. |
 | `VITE_COLLECTION_MAPPING` | No | `{}` | JSON string mapping source collections to targets. |
+| `VITE_MIGRATE_AGENTS` | No | `true` | Toggle to backup/restore Agent Builder agents. |
+| `VITE_MIGRATE_NOTEBOOKS` | No | `true` | Toggle to backup/restore NotebookLM notebooks. |
+| `VITE_FORCE_DOWNLOAD_BACKUP` | No | `false` | Enforce file download dialogs for backups instead of only writing to cache. |
+| `VITE_AUTO_CONVERT_FAILED_NOTES` | No | `false` | Automatically convert notes that failed regular restore into text sources. |
+| `VITE_SINGLE_CLICK_MIGRATION` | No | `true` | Minimizes user UI clicks, performing automated restore workflows when possible. |
+| `VITE_SOURCE_IDP` | No | `WiF` | Authenticating IDP type for the source environment. |
+| `VITE_TARGET_IDP` | No | `Google` | Authenticating IDP type for the target environment. |
 
 ### JSON Mapping Variables Example
 When configuring cross-environment migrations, specify mappings as escaped JSON strings:
@@ -246,3 +253,4 @@ gcloud run deploy backup-restore-app \
 | **WIF Sign-In Error: Origin Mismatch (400)** | The Authorized Redirect URI in Entra ID or Okta does not match the active host of the SPA. | Check the identity provider settings and ensure `http://localhost:5173` (development) or `https://backup.ge-dufrin.com` (production) is registered as an SPA redirect URI. |
 | **`ReferenceError: indexedDB is not defined`** | The application is running in an environment where IndexedDB is blocked or disabled (such as certain Incognito browser modes). | Run the application in a secure, non-incognito browser tab, or verify that browser cookies/site data are not blocked for the domain. |
 | **Restore Failed: datastore not found** | Target project has not provisioned the matching datastore structure. | Verify that datastores are created on the target, and ensure mapping variables (`VITE_DATASTORE_MAPPING`) are correctly set in the admin view. |
+| **Notebook Sharing Status Missing / `isShared` false** | The Discovery Engine Notebook API does not expose permissions or private collaborator lists. Private user sharing is not reflected in `isShared`. | This is a public API limitation. Use the manual checklist in Step 3 of the report to manually re-share the restored notebooks in the target environment. |
