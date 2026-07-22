@@ -617,17 +617,32 @@ const BackupPage: React.FC<BackupPageProps> = ({
   useEffect(() => {
     const { targetProject, targetLocation, targetAppId, targetCid } = userTabConfig;
     if (targetProject && targetLocation && targetAppId) {
-      const app = targetApps.find(a => a.name.split('/').pop() === targetAppId);
+      // Match either by resource name ID or display name
+      const app = targetApps.find(a => 
+        a.name.split('/').pop() === targetAppId || 
+        (a.displayName && a.displayName.trim().toLowerCase() === targetAppId.trim().toLowerCase())
+      );
       
       const processApp = (appDetails: any) => {
         const extractedCid = extractCidFromEngine(appDetails);
-        addLog(`[CID Resolution] Extracted CID: ${extractedCid || 'none'} for app ${targetAppId}`);
-        if (extractedCid && extractedCid !== targetCid) {
-          setUserTabConfig(prev => ({
-            ...prev,
-            targetCid: extractedCid,
-          }));
+        const resolvedAppId = appDetails.name.split('/').pop();
+        
+        if (extractedCid) {
+          addLog(`[CID Resolution] Extracted CID: ${extractedCid} for app ${resolvedAppId}`);
+        } else {
+          addLog(`[CID Resolution] Warning: Target app ${resolvedAppId} has no widget configuration or chat default URI. The API cannot resolve the console CID automatically. Please copy the CID (e.g., from your browser console URL) and paste it manually.`);
         }
+
+        setUserTabConfig(prev => {
+          const updates: any = {};
+          if (extractedCid && extractedCid !== targetCid) {
+            updates.targetCid = extractedCid;
+          }
+          if (resolvedAppId && resolvedAppId !== targetAppId) {
+            updates.targetAppId = resolvedAppId;
+          }
+          return Object.keys(updates).length > 0 ? { ...prev, ...updates } : prev;
+        });
       };
 
       if (app) {
@@ -638,12 +653,14 @@ const BackupPage: React.FC<BackupPageProps> = ({
         } else if (!cidFetchedEnginesRef.current.has(targetAppId)) {
           addLog(`[CID Resolution] Fetching engine details for ${targetAppId} to resolve CID...`);
           cidFetchedEnginesRef.current.add(targetAppId);
-          api.getEngine(targetAppId, {
+          
+          const resolvedAppId = app.name.split('/').pop()!;
+          api.getEngine(resolvedAppId, {
             projectId: targetProject,
             appLocation: targetLocation,
             collectionId: 'default_collection',
             accessToken: targetToken || accessToken,
-            appId: targetAppId,
+            appId: resolvedAppId,
             assistantId: 'default_assistant'
           }).then(fullApp => {
             addLog(`[CID Resolution] Engine details fetched successfully.`);
@@ -652,6 +669,9 @@ const BackupPage: React.FC<BackupPageProps> = ({
           }).catch(err => {
             addLog(`[CID Resolution] Failed to fetch engine details: ${err.message}`);
           });
+        } else {
+          // Cache check complete but no CID was found
+          processApp(app);
         }
       }
     }
