@@ -2372,13 +2372,18 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           }
 
           let notebookIndex = 0;
+          const totalNotebooks = filteredNotebooks.length;
+          
           for (const nb of filteredNotebooks) {
-            notebookIndex++;
-            setProgress({
-              percent: 55 + Math.round((notebookIndex / filteredNotebooks.length) * 40),
-              text: `Restoring notebook (${notebookIndex}/${filteredNotebooks.length}): ${nb.title || nb.name}...`
-            });
             const cleanTitle = nb.title || 'Restored Notebook';
+            const startPercent = 50 + Math.round((notebookIndex / totalNotebooks) * 45);
+            const sliceWidth = Math.round(45 / totalNotebooks);
+
+            setProgress({
+              percent: startPercent + Math.round(sliceWidth * 0.05),
+              text: `Restoring notebook (${notebookIndex + 1}/${totalNotebooks}): "${cleanTitle}"...`
+            });
+            notebookIndex++;
             
             const alreadyExists = existingNotebooks.some((n: any) => n.title === cleanTitle);
             if (alreadyExists) {
@@ -2391,15 +2396,24 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                 title: cleanTitle,
                 metadata: nb.metadata
               };
+              
+              setProgress({
+                percent: startPercent + Math.round(sliceWidth * 0.1),
+                text: `Creating notebook "${cleanTitle}" base on target...`
+              });
               const newNotebook = await api.createNotebook(targetConfig, payload);
               const newNotebookId = newNotebook.name.split('/').pop()!;
               addLog(`  - Created Notebook: ${newNotebookId}`);
 
-                            const sourceIdMap: Record<string, string> = {};
+              const sourceIdMap: Record<string, string> = {};
               if (nb.sources && nb.sources.length > 0) {
                 const restorableSources = nb.sources.filter(isRestorableSource);
                 const sourceRequests = restorableSources.map(mapSourceToPayload);
                 if (sourceRequests.length > 0) {
+                  setProgress({
+                    percent: startPercent + Math.round(sliceWidth * 0.25),
+                    text: `Creating ${sourceRequests.length} sources for "${cleanTitle}"...`
+                  });
                   try {
                     const response = await api.batchCreateNotebookSources(targetConfig, newNotebookId, sourceRequests);
                     const createdSources = response?.sources || [];
@@ -2424,7 +2438,13 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               // Restore Notes
               if (nb.notes && nb.notes.length > 0) {
                 let notesRestoredCount = 0;
+                let noteIndex = 0;
                 for (const note of nb.notes) {
+                  setProgress({
+                    percent: startPercent + Math.round(sliceWidth * (0.5 + (noteIndex / nb.notes.length) * 0.2)),
+                    text: `Creating notes for "${cleanTitle}" (${noteIndex + 1}/${nb.notes.length}): ${note.title || 'Untitled'}...`
+                  });
+                  noteIndex++;
                   try {
                     const notePayload = {
                       title: note.title || '',
@@ -2446,7 +2466,13 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               // Restore Artifacts (regenerate)
               if (nb.artifacts && nb.artifacts.length > 0) {
                 let artifactsRestoredCount = 0;
+                let artIndex = 0;
                 for (const artifact of nb.artifacts) {
+                  setProgress({
+                    percent: startPercent + Math.round(sliceWidth * (0.75 + (artIndex / nb.artifacts.length) * 0.2)),
+                    text: `Triggering artifact regeneration for "${cleanTitle}" (${artIndex + 1}/${nb.artifacts.length}): ${artifact.title || 'Untitled'}...`
+                  });
+                  artIndex++;
                   try {
                     // Rewrite top-level sources to the new source IDs
                     const newSources = (artifact.sources || []).map((src: any) => {
