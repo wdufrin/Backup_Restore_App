@@ -1118,9 +1118,12 @@ const BackupPage: React.FC<BackupPageProps> = ({
     knowledgeAttachments?: string[];
     localFiles?: string[];
     agentFiles?: string[];
+    failedNotes?: string[];
+    failedArtifacts?: string[];
   }
 
   const [manualActionReport, setManualActionReport] = useState<ManualActionReportItem[]>([]);
+  const [failedRestorePayload, setFailedRestorePayload] = useState<any | null>(null);
 
 
 
@@ -2123,6 +2126,37 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             }
           }
           rawNotebook.sources = fullSources;
+
+          // Fetch notes
+          const fullNotes = [];
+          try {
+            const notesResponse = await api.listNotes(sourceConfig, notebookId);
+            if (notesResponse && notesResponse.notes) {
+              for (const entry of notesResponse.notes) {
+                if (entry.note) {
+                  fullNotes.push(entry.note);
+                }
+              }
+            }
+          } catch (notesErr: any) {
+            addLog(`  - Warning: Failed to fetch notes for notebook ${notebookId}: ${notesErr.message}`);
+          }
+          rawNotebook.notes = fullNotes;
+          
+          // Fetch artifacts
+          const fullArtifacts = [];
+          try {
+            const artifactsResponse = await api.listArtifacts(sourceConfig, notebookId);
+            if (artifactsResponse && artifactsResponse.artifacts) {
+              for (const artifact of artifactsResponse.artifacts) {
+                fullArtifacts.push(artifact);
+              }
+            }
+          } catch (artErr: any) {
+            addLog(`  - Warning: Failed to fetch artifacts for notebook ${notebookId}: ${artErr.message}`);
+          }
+          rawNotebook.artifacts = fullArtifacts;
+
           fullBackupNotebooks.push(rawNotebook);
 
           // Since Notebook API does not expose userRole, we assume all accessible notebooks are owned/relevant.
@@ -2338,6 +2372,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
       });
     } else if (selectionModalAction === 'restore' || selectionModalAction === 'migrate') {
       executeOperation('RestoreUserData', async () => {
+        setFailedRestorePayload(null);
         addLog(`Restoring selected items...`);
         const filteredAgents = pendingBackupData.agents.filter((a: any) => selectedNames.has(a.name));
         const filteredNotebooks = pendingBackupData.notebooks.filter((n: any) => selectedNames.has(n.name));
@@ -2349,6 +2384,9 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           appId: userTabConfig.targetAppId || apiConfig.appId,
           accessToken: targetToken || accessToken,
         };
+
+        const failedNotes: any[] = [];
+        const failedArtifacts: any[] = [];
 
         // 1. Restore Agents
         if (filteredAgents.length > 0) {
@@ -2406,6 +2444,9 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               addLog(`  - Created Notebook: ${newNotebookId}`);
 
               const sourceIdMap: Record<string, string> = {};
+              const fallbackSourcePayloads: any[] = [];
+              const notebookFailedNotes: any[] = [];
+              const notebookFailedArtifacts: any[] = [];
               if (nb.sources && nb.sources.length > 0) {
                 const restorableSources = nb.sources.filter(isRestorableSource);
                 const sourceRequests = restorableSources.map(mapSourceToPayload);
@@ -2456,10 +2497,24 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                     notesRestoredCount++;
                   } catch (noteErr: any) {
                     addLog(`    - Warning: Failed to restore note "${note.title || 'Untitled'}": ${noteErr.message}`);
+                    notebookFailedNotes.push(note);
+                    const noteText = note.content || extractTextFromTailwindDoc(note.tailwindDocContent || note.tailwindDoc);
+                    fallbackSourcePayloads.push({
+                      textContent: {
+                        sourceName: `[Note] ${note.title || 'Restored Note'}`,
+                        content: noteText || '[Empty Note]'
+                      }
+                    });
                   }
                 }
                 if (notesRestoredCount > 0) {
                   addLog(`    - Restored ${notesRestoredCount} note(s).`);
+                }
+                if (notebookFailedNotes.length > 0) {
+                  failedNotes.push({
+                    title: cleanTitle,
+                    notes: notebookFailedNotes
+                  });
                 }
               }
 
@@ -2517,16 +2572,63 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                     artifactsRestoredCount++;
                   } catch (artErr: any) {
                     addLog(`    - Warning: Failed to recreate artifact "${artifact.title || 'Untitled'}": ${artErr.message}`);
+                    notebookFailedArtifacts.push(artifact);
+                    const artText = artifact.tailoredReport?.content || artifact.content || extractTextFromTailwindDoc(artifact.tailwindDocContent);
+                    if (artText) {
+                      fallbackSourcePayloads.push({
+                        textContent: {
+                          sourceName: `[Artifact: ${artifact.type || 'Doc'}] ${artifact.title || 'Restored Document'}`,
+                          content: artText
+                        }
+                      });
+                    }
                   }
                 }
                 if (artifactsRestoredCount > 0) {
                   addLog(`    - Triggered regeneration for ${artifactsRestoredCount} artifact(s).`);
+                }
+                if (notebookFailedArtifacts.length > 0) {
+                  failedArtifacts.push({
+                    title: cleanTitle,
+                    artifacts: notebookFailedArtifacts
+                  });
+                }
+              }
+
+              if (fallbackSourcePayloads.length > 0) {
+                addLog(`  - Whitelist bypass: uploading ${fallbackSourcePayloads.length} notes/artifacts as text sources...`);
+                try {
+                  await api.batchCreateNotebookSources(targetConfig, newNotebookId, fallbackSourcePayloads);
+                  addLog(`    - Successfully restored ${fallbackSourcePayloads.length} notes/artifacts as text sources.`);
+                  notebookFailedNotes.length = 0;
+                  notebookFailedArtifacts.length = 0;
+                } catch (fallbackErr: any) {
+                  addLog(`    - Error uploading fallback sources: ${fallbackErr.message}`);
                 }
               }
             } catch (nbErr: any) {
               addLog(`  - Error restoring notebook ${nb.name}: ${nbErr.message}`);
             }
           }
+
+          if (failedNotes.length > 0 || failedArtifacts.length > 0) {
+            setFailedRestorePayload({
+              notebooks: filteredNotebooks.map((nb: any) => {
+                const cleanTitle = nb.title || 'Restored Notebook';
+                const nbNotes = failedNotes.find(f => f.title === cleanTitle)?.notes || [];
+                const nbArts = failedArtifacts.find(f => f.title === cleanTitle)?.artifacts || [];
+                return {
+                  title: cleanTitle,
+                  notes: nbNotes,
+                  artifacts: nbArts
+                };
+              }).filter((nb: any) => nb.notes.length > 0 || nb.artifacts.length > 0)
+            });
+          } else {
+            setFailedRestorePayload(null);
+          }
+        } else {
+          setFailedRestorePayload(null);
         }
 
         // Compile Manual Action Report
@@ -2628,10 +2730,16 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             }
           }
 
+          const nbTitle = nb.title || nb.displayName || 'Unnamed Notebook';
+          const nbFailedNotes = failedNotes.find(fn => fn.title === nbTitle)?.notes.map((n: any) => n.title || 'Untitled Note') || [];
+          const nbFailedArtifacts = failedArtifacts.find(fa => fa.title === nbTitle)?.artifacts.map((a: any) => a.title || 'Untitled Artifact') || [];
+
           report.push({
-            notebookTitle: nb.title || nb.displayName || 'Unnamed Notebook',
+            notebookTitle: nbTitle,
             sharedWith: Array.from(new Set(sharedWith)),
             localFiles: localFiles,
+            failedNotes: nbFailedNotes,
+            failedArtifacts: nbFailedArtifacts,
           });
         }
         
@@ -3159,7 +3267,9 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
       (item.unmappedDatastores && item.unmappedDatastores.length > 0)
     );
     const step3NotebookItems = restoredNotebooks.filter(item => 
-      item.localFiles && item.localFiles.length > 0
+      (item.localFiles && item.localFiles.length > 0) ||
+      (item.failedNotes && item.failedNotes.length > 0) ||
+      (item.failedArtifacts && item.failedArtifacts.length > 0)
     );
 
     // Step 4 items: only show items that are shared with at least one user
@@ -3167,7 +3277,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
     const step4NotebookItems = restoredNotebooks.filter(item => item.sharedWith && item.sharedWith.length > 0);
 
     return (
-      <div className="space-y-6 text-xs text-gray-800 dark:text-gray-200">
+      <div className="space-y-6 text-xs text-gray-800 dark:text-gray-200 font-sans">
         <p className="text-xs text-gray-600 dark:text-white mb-4 font-medium">
           Please complete the following manual steps to finalize your restoration.
         </p>
@@ -3276,7 +3386,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                       <p className="font-semibold text-gray-900 dark:text-white">Re-upload missing files for Notebook: "{nb.notebookTitle}"</p>
                     </div>
                   </div>
-                  <div className="pl-6 font-mono text-gray-500">
+                  <div className="pl-6 text-gray-500 space-y-2">
                     {nb.localFiles && nb.localFiles.length > 0 && (
                       <div>
                         <p className="font-semibold text-[10px] text-amber-700 mb-0.5">Local Files to re-upload:</p>
@@ -3284,6 +3394,30 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                           {nb.localFiles.map((file, fIdx) => (
                             <span key={fIdx} className="px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded text-[10px] font-medium font-sans">
                               {file}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {nb.failedNotes && nb.failedNotes.length > 0 && (
+                      <div>
+                        <p className="font-semibold text-[10px] text-red-650 dark:text-red-400 mb-0.5">Failed Notes (Please manually recreate inside notebook):</p>
+                        <div className="flex flex-col gap-1 pl-1">
+                          {nb.failedNotes.map((noteTitle, nIdx) => (
+                            <span key={nIdx} className="text-[10px] text-red-700 dark:text-red-300 font-medium">
+                              • {noteTitle}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {nb.failedArtifacts && nb.failedArtifacts.length > 0 && (
+                      <div>
+                        <p className="font-semibold text-[10px] text-red-650 dark:text-red-400 mb-0.5">Failed Briefing Docs & Decks (Please manually regenerate):</p>
+                        <div className="flex flex-col gap-1 pl-1">
+                          {nb.failedArtifacts.map((artTitle, aIdx) => (
+                            <span key={aIdx} className="text-[10px] text-red-700 dark:text-red-300 font-medium">
+                              • {artTitle}
                             </span>
                           ))}
                         </div>
