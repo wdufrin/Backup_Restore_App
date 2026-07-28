@@ -1469,30 +1469,20 @@ Step 1: Create the custom role:
 gcloud iam roles create customBackupViewer \\
     --project=${targetProject} \\
     --title="Discovery Engine Custom Backup Viewer" \\
-    --permissions="discoveryengine.collections.list,\\
-discoveryengine.engines.list,\\
-discoveryengine.engines.get,\\
-discoveryengine.assistants.list,\\
-discoveryengine.assistants.get,\\
-discoveryengine.agents.list,\\
-discoveryengine.agents.get,\\
+    --permissions="discoveryengine.agents.get,\\
 discoveryengine.agents.getAgentView,\\
 discoveryengine.agents.getIamPolicy,\\
-discoveryengine.agents.create,\\
-discoveryengine.agents.update,\\
-discoveryengine.agents.setIamPolicy,\\
+discoveryengine.agents.list,\\
 discoveryengine.agents.manage,\\
-discoveryengine.dataStores.list,\\
-discoveryengine.dataConnectors.get,\\
-discoveryengine.notebooks.list,\\
+discoveryengine.assistants.get,\\
+discoveryengine.assistants.list,\\
+discoveryengine.collections.list,\\
+discoveryengine.engines.get,\\
+discoveryengine.engines.list,\\
 discoveryengine.notebooks.get,\\
-discoveryengine.notebooks.create,\\
-aiplatform.reasoningEngines.list,\\
-storage.buckets.list,\\
-storage.objects.list,\\
-storage.objects.get,\\
-storage.objects.create,\\
-storage.objects.delete,\\
+discoveryengine.notebooks.list,\\
+serviceusage.services.get,\\
+serviceusage.services.list,\\
 serviceusage.services.use" \\
     --stage=GA
 

@@ -88,6 +88,56 @@ API interactions are authenticated using the active OAuth credentials of the end
 3. **Quota/Billing Project**
    * **Required Permission**: `serviceusage.services.use` on the billing/quota project (to authenticate API calls).
 
+### Alternative: Custom IAM Role (Least-Privilege)
+
+For organizations requiring strict least-privilege access control, you can create a custom IAM role instead of granting standard `discoveryengine.user` or `discoveryengine.editor` / `discoveryengine.admin` roles.
+
+#### 1. Create Custom Role in Source and Target Projects
+
+Create a custom role named `customBackupViewer` at the project level in **BOTH** the source and target projects with the following permissions:
+- **`discoveryengine.agents.get`**
+- **`discoveryengine.agents.getAgentView`**
+- **`discoveryengine.agents.getIamPolicy`**
+- **`discoveryengine.agents.list`**
+- **`discoveryengine.agents.manage`**
+- **`discoveryengine.assistants.get`**
+- **`discoveryengine.assistants.list`**
+- **`discoveryengine.collections.list`**
+- **`discoveryengine.engines.get`**
+- **`discoveryengine.engines.list`**
+- **`discoveryengine.notebooks.get`**
+- **`discoveryengine.notebooks.list`**
+- **`serviceusage.services.get`**
+- **`serviceusage.services.list`**
+- **`serviceusage.services.use`**
+
+You can create it using `gcloud`:
+
+```bash
+gcloud iam roles create customBackupViewer \
+    --project="YOUR_PROJECT_ID" \
+    --title="Discovery Engine Custom Backup Viewer" \
+    --description="Permissions needed to list and read engines, assistants, agents, and notebooks for backup and restore operations." \
+    --permissions="discoveryengine.agents.get,discoveryengine.agents.getAgentView,discoveryengine.agents.getIamPolicy,discoveryengine.agents.list,discoveryengine.agents.manage,discoveryengine.assistants.get,discoveryengine.assistants.list,discoveryengine.collections.list,discoveryengine.engines.get,discoveryengine.engines.list,discoveryengine.notebooks.get,discoveryengine.notebooks.list,serviceusage.services.get,serviceusage.services.list,serviceusage.services.use" \
+    --stage=GA
+```
+
+#### 2. Assign Role to Users/Groups
+
+Grant this custom role to your Workforce Principal, Group, or user in BOTH the source and target projects:
+
+```bash
+# Bind in Source Project
+gcloud projects add-iam-policy-binding "SOURCE_PROJECT_ID" \
+    --member="principalSet://iam.googleapis.com/locations/global/workforcePools/YOUR_POOL_ID/group/YOUR_AD_OR_OKTA_GROUP_NAME" \
+    --role="projects/SOURCE_PROJECT_ID/roles/customBackupViewer"
+
+# Bind in Target Project
+gcloud projects add-iam-policy-binding "TARGET_PROJECT_ID" \
+    --member="principalSet://iam.googleapis.com/locations/global/workforcePools/YOUR_POOL_ID/group/YOUR_AD_OR_OKTA_GROUP_NAME" \
+    --role="projects/TARGET_PROJECT_ID/roles/customBackupViewer"
+```
+
 #### 2. Admin Mode (System Configuration)
 Administrators configuring identity providers or client IDs need:
 *   **Quota/Billing:** `serviceusage.services.use` (on the quota project)
@@ -141,7 +191,7 @@ gcloud iam workforce-pools providers create-oidc YOUR_PROVIDER_ID \
 ```bash
 gcloud projects add-iam-policy-binding "YOUR_PROJECT_ID" \
     --member="principalSet://iam.googleapis.com/locations/global/workforcePools/YOUR_POOL_ID/group/YOUR_AD_OR_OKTA_GROUP_NAME" \
-    --role="projects/YOUR_PROJECT_ID/roles/customBackupMigrator"
+    --role="projects/YOUR_PROJECT_ID/roles/customBackupViewer"
 ```
 
 ---

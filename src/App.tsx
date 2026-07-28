@@ -521,6 +521,7 @@ function App() {
             <span className="text-lg font-semibold text-gray-900 dark:text-white">Gemini Enterprise</span>
             <span className="text-gray-400">|</span>
             <span className="text-lg text-gray-600 dark:text-gray-400">Backup & Recovery</span>
+            <span className="text-xs text-gray-400 dark:text-gray-500 self-end mb-0.5">v{import.meta.env.VITE_APP_VERSION}</span>
           </div>
         </div>
         <div className="flex items-center gap-6 flex-shrink-0">
