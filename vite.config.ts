@@ -10,11 +10,13 @@ try {
   console.warn('Warning: Could not get git commit count, defaulting to 0')
 }
 
+const appVersion = process.env.VITE_APP_VERSION || `1.0.${commitCount}`;
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
   define: {
-    'import.meta.env.VITE_APP_VERSION': JSON.stringify(`1.0.${commitCount}`),
+    'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
   },
   server: {
     proxy: {
