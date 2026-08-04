@@ -416,6 +416,9 @@ const isMemberCurrentUser = (member: string, userEmail: string, userSub: string,
 };
 
 const isNotebookOwnedByUser = (notebook: any, userEmail: string, userSub: string, poolId?: string): boolean => {
+  if (notebook.metadata?.userRole) {
+    return notebook.metadata.userRole === 'PROJECT_ROLE_OWNER';
+  }
   if (notebook.iamPolicy && notebook.iamPolicy.bindings) {
     const ownerBinding = notebook.iamPolicy.bindings.find((b: any) => b.role === 'roles/discoveryengine.notebookOwner' || b.role === 'roles/owner');
     if (ownerBinding && ownerBinding.members) {
@@ -1751,16 +1754,9 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           const rawNotebook = await api.getNotebook(sourceConfig, notebookId);
           let isOwned = true;
           if (!userTabConfig.bypassOwnerFilter) {
-            try {
-              const policy = await api.getNotebookIamPolicy(nb.name, sourceConfig);
-              const nbWithPolicy = { ...rawNotebook, iamPolicy: policy };
-              isOwned = isNotebookOwnedByUser(nbWithPolicy, userEmail, userSub, poolId);
-              if (isDebugMode) {
-                addLog(`[DEBUG] Notebook owner check: ${nb.title || nb.name}, isOwned = ${isOwned}`);
-              }
-            } catch (policyErr: any) {
-              addLog(`    - Warning: Failed to fetch IAM policy for notebook "${nb.title || nb.name}": ${policyErr.message}. Assuming owned.`);
-              isOwned = true;
+            isOwned = isNotebookOwnedByUser(rawNotebook, userEmail, userSub, poolId);
+            if (isDebugMode) {
+              addLog(`[DEBUG] Notebook owner check (metadata): ${nb.title || nb.name}, isOwned = ${isOwned}`);
             }
           }
 
@@ -2223,14 +2219,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
 
           let isOwned = true;
           if (!userTabConfig.bypassOwnerFilter) {
-            try {
-              const policy = await api.getNotebookIamPolicy(nb.name, sourceConfig);
-              const nbWithPolicy = { ...rawNotebook, iamPolicy: policy };
-              isOwned = isNotebookOwnedByUser(nbWithPolicy, userEmail, userSub, poolId);
-            } catch (policyErr: any) {
-              addLog(`  - Warning: Failed to fetch IAM policy for notebook ${notebookId}: ${policyErr.message}. Assuming owned.`);
-              isOwned = true;
-            }
+            isOwned = isNotebookOwnedByUser(rawNotebook, userEmail, userSub, poolId);
           }
           
           const cleanTitle = rawNotebook.title || rawNotebook.displayName || 'Restored Notebook';
