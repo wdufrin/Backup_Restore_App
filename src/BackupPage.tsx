@@ -130,9 +130,13 @@ const isRestorableSource = (source: any): boolean => {
   // Allow all supported link/doc types, including local files (agentspaceMetadata)
   return !!(
     source.metadata?.googleDocsMetadata ||
+    source.metadata?.google_docs_metadata ||
     source.metadata?.youtubeMetadata ||
+    source.metadata?.youtube_metadata ||
     source.metadata?.webpageMetadata ||
+    source.metadata?.webpage_metadata ||
     source.metadata?.agentspaceMetadata ||
+    source.metadata?.agentspace_metadata ||
     source.url ||
     source.webScrapeConfig ||
     source.content ||
@@ -145,17 +149,22 @@ const mapSourceToPayload = (source: any) => {
   const sourcePayload: any = {};
   const sourceName = source.title || source.displayName || 'Restored Source';
 
-  if (source.metadata?.googleDocsMetadata) {
+  const gDocsMeta = source.metadata?.googleDocsMetadata || source.metadata?.google_docs_metadata;
+  const ytMeta = source.metadata?.youtubeMetadata || source.metadata?.youtube_metadata;
+  const asMeta = source.metadata?.agentspaceMetadata || source.metadata?.agentspace_metadata;
+  const webMeta = source.metadata?.webpageMetadata || source.metadata?.webpage_metadata;
+
+  if (gDocsMeta) {
     sourcePayload.googleDriveContent = {
       sourceName: sourceName,
-      documentId: source.metadata.googleDocsMetadata.documentId,
-      mimeType: source.metadata.googleDocsMetadata.mimeType || 'application/vnd.google-apps.document'
+      documentId: gDocsMeta.documentId,
+      mimeType: gDocsMeta.mimeType || 'application/vnd.google-apps.document'
     };
-  } else if (source.metadata?.youtubeMetadata) {
+  } else if (ytMeta) {
     sourcePayload.videoContent = {
-      youtubeUrl: source.metadata.youtubeMetadata.youtubeUrl || source.metadata.youtubeMetadata.uri || source.metadata.youtubeMetadata.url
+      youtubeUrl: ytMeta.youtubeUrl || ytMeta.uri || ytMeta.url || (ytMeta.videoId ? `https://www.youtube.com/watch?v=${ytMeta.videoId}` : undefined)
     };
-  } else if (source.metadata?.agentspaceMetadata) {
+  } else if (asMeta) {
     // If the file's text content is already stored/extracted, recreate it as text content
     const extractedText = source.content || source.text || extractTextFromTailwindDoc(source.tailwindDoc);
     if (extractedText) {
@@ -165,13 +174,13 @@ const mapSourceToPayload = (source: any) => {
       };
     } else {
       sourcePayload.agentspaceContent = {
-        documentName: source.metadata.agentspaceMetadata.documentName
+        documentName: asMeta.documentName
       };
     }
-  } else if (source.metadata?.webpageMetadata || source.webScrapeConfig || source.url) {
+  } else if (webMeta || source.webScrapeConfig || source.url) {
     sourcePayload.webContent = {
       sourceName: sourceName,
-      url: source.metadata?.webpageMetadata?.webpageUrl || source.url || (source.webScrapeConfig && source.webScrapeConfig.url)
+      url: webMeta?.webpageUrl || source.url || (source.webScrapeConfig && source.webScrapeConfig.url)
     };
   } else {
     // Fallback to minimal text content if unidentifiable or unsupported
@@ -403,6 +412,16 @@ const isMemberCurrentUser = (member: string, userEmail: string, userSub: string,
     if (member.includes('/subject/') && member.split('/subject/').pop() === userSub) return true;
   }
   
+  return false;
+};
+
+const isNotebookOwnedByUser = (notebook: any, userEmail: string, userSub: string, poolId?: string): boolean => {
+  if (notebook.iamPolicy && notebook.iamPolicy.bindings) {
+    const ownerBinding = notebook.iamPolicy.bindings.find((b: any) => b.role === 'roles/discoveryengine.notebookOwner' || b.role === 'roles/owner');
+    if (ownerBinding && ownerBinding.members) {
+      return ownerBinding.members.some((member: string) => isMemberCurrentUser(member, userEmail, userSub, poolId));
+    }
+  }
   return false;
 };
 
@@ -1732,8 +1751,17 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           const rawNotebook = await api.getNotebook(sourceConfig, notebookId);
           let isOwned = true;
           if (!userTabConfig.bypassOwnerFilter) {
-            // Since Notebook API does not expose userRole, we assume all accessible notebooks are owned/relevant.
-            isOwned = true;
+            try {
+              const policy = await api.getNotebookIamPolicy(nb.name, sourceConfig);
+              const nbWithPolicy = { ...rawNotebook, iamPolicy: policy };
+              isOwned = isNotebookOwnedByUser(nbWithPolicy, userEmail, userSub, poolId);
+              if (isDebugMode) {
+                addLog(`[DEBUG] Notebook owner check: ${nb.title || nb.name}, isOwned = ${isOwned}`);
+              }
+            } catch (policyErr: any) {
+              addLog(`    - Warning: Failed to fetch IAM policy for notebook "${nb.title || nb.name}": ${policyErr.message}. Assuming owned.`);
+              isOwned = true;
+            }
           }
 
           if (isOwned) {
@@ -2193,8 +2221,17 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
 
           fullBackupNotebooks.push(rawNotebook);
 
-          // Since Notebook API does not expose userRole, we assume all accessible notebooks are owned/relevant.
-          const isOwned = true;
+          let isOwned = true;
+          if (!userTabConfig.bypassOwnerFilter) {
+            try {
+              const policy = await api.getNotebookIamPolicy(nb.name, sourceConfig);
+              const nbWithPolicy = { ...rawNotebook, iamPolicy: policy };
+              isOwned = isNotebookOwnedByUser(nbWithPolicy, userEmail, userSub, poolId);
+            } catch (policyErr: any) {
+              addLog(`  - Warning: Failed to fetch IAM policy for notebook ${notebookId}: ${policyErr.message}. Assuming owned.`);
+              isOwned = true;
+            }
+          }
           
           const cleanTitle = rawNotebook.title || rawNotebook.displayName || 'Restored Notebook';
           const exists = targetNotebooks.some(n => n.title === cleanTitle);

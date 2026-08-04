@@ -1237,6 +1237,19 @@ export const listNotebooks = async (config: Config) => {
     return gapiRequest<any>(url, 'GET', projectId, undefined, undefined, config.accessToken ? { 'Authorization': `Bearer ${config.accessToken}` } : undefined);
 };
 
+export const getNotebookIamPolicy = async (name: string, config: Config) => {
+    const baseUrl = getDiscoveryEngineUrl(config.appLocation);
+    const url = `${baseUrl}/${DISCOVERY_API_VERSION}/${name}:getIamPolicy`;
+    return gapiRequest<any>(url, 'GET', config.projectId, undefined, undefined, config.accessToken ? { 'Authorization': `Bearer ${config.accessToken}` } : undefined);
+};
+
+export const setNotebookIamPolicy = async (name: string, policy: any, config: Config, suppressErrorLog: boolean = false) => {
+    const baseUrl = getDiscoveryEngineUrl(config.appLocation);
+    const url = `${baseUrl}/${DISCOVERY_API_VERSION}/${name}:setIamPolicy`;
+    return gapiRequest<any>(url, 'POST', config.projectId, undefined, { policy }, config.accessToken ? { 'Authorization': `Bearer ${config.accessToken}` } : undefined, suppressErrorLog);
+};
+
+
 export const getNotebook = async (config: Config, notebookId: string) => {
     const { projectId, appLocation } = config;
     const baseUrl = getDiscoveryEngineUrl(appLocation);
@@ -1464,7 +1477,7 @@ export const restoreAgentsServerSide = async (
         authorizations: !currentAgent.authorizationConfig ? currentAgent.authorizations : undefined,
       };
 
-      const blacklist = ['name', 'createTime', 'updateTime', 'agentIdentityInfo', 'iamPolicy', 'agentType', 'disabled', 'disabledReason', 'category'];
+      const blacklist = ['name', 'createTime', 'updateTime', 'agentIdentityInfo', 'iamPolicy', 'agentType', 'disabled', 'disabledReason', 'category', 'agentFiles', 'targetId'];
       for (const key of Object.keys(currentAgent)) {
         if (!blacklist.includes(key) && !(key in payload)) {
           payload[key] = currentAgent[key];
