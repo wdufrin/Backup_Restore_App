@@ -3922,10 +3922,10 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                   />
                   <div>
                     <label htmlFor="bypassOwnerFilter" className="text-sm font-medium text-gray-700 cursor-pointer select-none">
-                      Migrate all agents in selected Engine (bypasses WIF user-level owner filtering)
+                      Bypass user owner filter (Migrate all agents and notebooks in context)
                     </label>
                     <p className="text-xs text-gray-400 mt-1">
-                      Check this if the selected source Engine represents a personal or single-user workspace app. Bypassing individual owner check ensures default agents (e.g., HR-Advisory2) and shared assets are correctly migrated.
+                      Check this to display and backup all agents and notebooks you have access to. Shared/collaborator notebooks will be displayed with a "Shared?" badge, while owned notebooks will be labeled "Owner". If unchecked, shared notebooks and agents will be hidden.
                     </p>
                   </div>
                 </div>
@@ -4831,10 +4831,10 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                   />
                   <div>
                     <label htmlFor="adminBypassOwnerFilter" className="text-xs text-gray-700 dark:text-white font-semibold cursor-pointer select-none">
-                      Bypass user WIF owner filter (Migrate all agents in context)
+                      Bypass user owner filter (Migrate all agents and notebooks in context)
                     </label>
                     <p className="text-[10px] text-gray-400 mt-0.5">
-                      Ensures default workspace agents and shared assets are migrated without restriction.
+                      Check this to display and migrate all accessible agents and notebooks. Shared notebooks will be marked as "Shared?" while owned ones are marked "Owner".
                     </p>
                   </div>
                 </div>
