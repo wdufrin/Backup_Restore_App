@@ -493,8 +493,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
     targetLocation: string;
     targetAppId: string;
     targetAppUrl: string;
-    targetCid?: string;
-    bypassOwnerFilter?: boolean;
+    bypassAgentOwnerFilter?: boolean;
+    bypassNotebookOwnerFilter?: boolean;
     enableAgentViewFallback?: boolean;
     forceDownloadBackup?: boolean;
     autoConvertFailedNotes?: boolean;
@@ -502,19 +502,29 @@ const BackupPage: React.FC<BackupPageProps> = ({
 
   const [userTabConfig, setUserTabConfig] = useState<UserTabConfig>(() => {
     const saved = localStorage.getItem('agentspace-userTabConfig');
-    return saved ? JSON.parse(saved) : {
-      sourceProject: import.meta.env.VITE_SOURCE_PROJECT || '',
-      sourceLocation: import.meta.env.VITE_SOURCE_LOCATION || 'global',
-      sourceAppId: import.meta.env.VITE_SOURCE_APP_ID || '',
-      targetProject: import.meta.env.VITE_TARGET_PROJECT || '',
-      targetLocation: import.meta.env.VITE_TARGET_LOCATION || 'global',
-      targetAppId: import.meta.env.VITE_TARGET_APP_ID || '',
-      targetAppUrl: import.meta.env.VITE_TARGET_APP_URL || '',
-      targetCid: import.meta.env.VITE_TARGET_CID || '',
-      bypassOwnerFilter: import.meta.env.VITE_BYPASS_OWNER_FILTER === 'true',
-      enableAgentViewFallback: import.meta.env.VITE_ENABLE_AGENT_VIEW_FALLBACK !== 'false', // Default to true
-      forceDownloadBackup: import.meta.env.VITE_FORCE_DOWNLOAD_BACKUP === 'true',
-      autoConvertFailedNotes: import.meta.env.VITE_AUTO_CONVERT_FAILED_NOTES === 'true', // Default to false
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return {
+        ...parsed,
+        bypassAgentOwnerFilter: parsed.bypassAgentOwnerFilter !== undefined ? parsed.bypassAgentOwnerFilter : parsed.bypassOwnerFilter,
+        bypassNotebookOwnerFilter: parsed.bypassNotebookOwnerFilter !== undefined ? parsed.bypassNotebookOwnerFilter : parsed.bypassOwnerFilter,
+      };
+    }
+    const base = { ...import.meta.env, ...runtimeConfig };
+    return {
+      sourceProject: base.VITE_SOURCE_PROJECT || '',
+      sourceLocation: base.VITE_SOURCE_LOCATION || 'global',
+      sourceAppId: base.VITE_SOURCE_APP_ID || '',
+      targetProject: base.VITE_TARGET_PROJECT || '',
+      targetLocation: base.VITE_TARGET_LOCATION || 'global',
+      targetAppId: base.VITE_TARGET_APP_ID || '',
+      targetAppUrl: base.VITE_TARGET_APP_URL || '',
+      targetCid: base.VITE_TARGET_CID || '',
+      bypassAgentOwnerFilter: base.VITE_BYPASS_AGENT_OWNER_FILTER === 'true' || base.VITE_BYPASS_OWNER_FILTER === 'true',
+      bypassNotebookOwnerFilter: base.VITE_BYPASS_NOTEBOOK_OWNER_FILTER === 'true' || base.VITE_BYPASS_OWNER_FILTER === 'true',
+      enableAgentViewFallback: base.VITE_ENABLE_AGENT_VIEW_FALLBACK !== 'false', // Default to true
+      forceDownloadBackup: base.VITE_FORCE_DOWNLOAD_BACKUP === 'true',
+      autoConvertFailedNotes: base.VITE_AUTO_CONVERT_FAILED_NOTES === 'true', // Default to false
     };
   });
   const [isUserConfigModalOpen, setIsUserConfigModalOpen] = useState(false);
@@ -598,7 +608,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
         targetAppId: base.VITE_TARGET_APP_ID || '',
         targetAppUrl: base.VITE_TARGET_APP_URL || '',
         targetCid: base.VITE_TARGET_CID || '',
-        bypassOwnerFilter: base.VITE_BYPASS_OWNER_FILTER === 'true',
+        bypassAgentOwnerFilter: base.VITE_BYPASS_AGENT_OWNER_FILTER === 'true' || base.VITE_BYPASS_OWNER_FILTER === 'true',
+        bypassNotebookOwnerFilter: base.VITE_BYPASS_NOTEBOOK_OWNER_FILTER === 'true' || base.VITE_BYPASS_OWNER_FILTER === 'true',
         enableAgentViewFallback: base.VITE_ENABLE_AGENT_VIEW_FALLBACK !== 'false',
         forceDownloadBackup: base.VITE_FORCE_DOWNLOAD_BACKUP === 'true',
       });
@@ -831,7 +842,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
     content += `VITE_SOURCE_PROJECT=${userTabConfig.sourceProject}\n`;
     content += `VITE_SOURCE_LOCATION=${userTabConfig.sourceLocation}\n`;
     content += `VITE_SOURCE_APP_ID=${userTabConfig.sourceAppId}\n`;
-    content += `VITE_BYPASS_OWNER_FILTER=${userTabConfig.bypassOwnerFilter || false}\n`;
+    content += `VITE_BYPASS_AGENT_OWNER_FILTER=${userTabConfig.bypassAgentOwnerFilter || false}\n`;
+    content += `VITE_BYPASS_NOTEBOOK_OWNER_FILTER=${userTabConfig.bypassNotebookOwnerFilter || false}\n`;
     content += `VITE_ENABLE_AGENT_VIEW_FALLBACK=${userTabConfig.enableAgentViewFallback || false}\n`;
     
     const sourceIdpVal = sourceIdp;
@@ -953,7 +965,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
             targetAppId: config.VITE_TARGET_APP_ID || '',
             targetAppUrl: config.VITE_TARGET_APP_URL || '',
             targetCid: config.VITE_TARGET_CID || '',
-            bypassOwnerFilter: config.VITE_BYPASS_OWNER_FILTER === 'true',
+            bypassAgentOwnerFilter: config.VITE_BYPASS_AGENT_OWNER_FILTER === 'true' || config.VITE_BYPASS_OWNER_FILTER === 'true',
+            bypassNotebookOwnerFilter: config.VITE_BYPASS_NOTEBOOK_OWNER_FILTER === 'true' || config.VITE_BYPASS_OWNER_FILTER === 'true',
             enableAgentViewFallback: config.VITE_ENABLE_AGENT_VIEW_FALLBACK !== 'false', // Default to true if missing/not set to false
             forceDownloadBackup: config.VITE_FORCE_DOWNLOAD_BACKUP === 'true',
           };
@@ -1077,7 +1090,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
       targetAppId: base.VITE_TARGET_APP_ID || '',
       targetAppUrl: base.VITE_TARGET_APP_URL || '',
       targetCid: base.VITE_TARGET_CID || '',
-      bypassOwnerFilter: base.VITE_BYPASS_OWNER_FILTER === 'true',
+      bypassAgentOwnerFilter: base.VITE_BYPASS_AGENT_OWNER_FILTER === 'true' || base.VITE_BYPASS_OWNER_FILTER === 'true',
+      bypassNotebookOwnerFilter: base.VITE_BYPASS_NOTEBOOK_OWNER_FILTER === 'true' || base.VITE_BYPASS_OWNER_FILTER === 'true',
       enableAgentViewFallback: base.VITE_ENABLE_AGENT_VIEW_FALLBACK !== 'false',
       forceDownloadBackup: base.VITE_FORCE_DOWNLOAD_BACKUP === 'true',
       autoConvertFailedNotes: base.VITE_AUTO_CONVERT_FAILED_NOTES === 'true',
@@ -1768,7 +1782,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             addLog(`[DEBUG] Notebook owner check (metadata): ${nb.title || nb.name}, isOwned = ${isActualOwner}`);
           }
 
-          const shouldInclude = isActualOwner || userTabConfig.bypassOwnerFilter;
+          const shouldInclude = isActualOwner || userTabConfig.bypassNotebookOwnerFilter;
           if (shouldInclude) {
             rawNotebook.isOwned = isActualOwner;
                         // Fetch sources
@@ -1827,7 +1841,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
         }
         await delay(500); // Rate limit
       }
-      if (userTabConfig.bypassOwnerFilter) {
+      if (userTabConfig.bypassNotebookOwnerFilter) {
         addLog(`Found ${userNotebooks.length} notebooks (bypassing owner filtering).`);
       } else {
         addLog(`Found ${userNotebooks.length} notebooks accessible to you.`);
@@ -2129,7 +2143,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               }
 
               // Only show WIF user-owned agents OR shared/unowned agents (no explicit owner)
-              if (isOwned || !hasOwner) {
+              if (isOwned || !hasOwner || userTabConfig.bypassAgentOwnerFilter) {
                  const collision = await checkAgentCollision(
                    agentWithPolicy,
                    targetAgents,
@@ -2227,7 +2241,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
           }
           rawNotebook.artifacts = fullArtifacts;
           const isActualOwner = isNotebookOwnedByUser(rawNotebook, userEmail, userSub, poolId, isDebugMode ? addLog : undefined);
-          const shouldInclude = isActualOwner || userTabConfig.bypassOwnerFilter;
+          const shouldInclude = isActualOwner || userTabConfig.bypassNotebookOwnerFilter;
 
           if (shouldInclude) {
             rawNotebook.isOwned = isActualOwner;
@@ -3915,17 +3929,35 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                 <div className="flex items-start gap-2">
                   <input 
                     type="checkbox" 
-                    id="bypassOwnerFilter"
-                    checked={!!userTabConfig.bypassOwnerFilter} 
-                    onChange={(e) => setUserTabConfig(prev => ({ ...prev, bypassOwnerFilter: e.target.checked }))} 
+                    id="bypassAgentOwnerFilter"
+                    checked={!!userTabConfig.bypassAgentOwnerFilter} 
+                    onChange={(e) => setUserTabConfig(prev => ({ ...prev, bypassAgentOwnerFilter: e.target.checked }))} 
                     className="mt-1 w-4 h-4 rounded text-indigo-600 border-gray-300 focus:ring-indigo-500"
                   />
                   <div>
-                    <label htmlFor="bypassOwnerFilter" className="text-sm font-medium text-gray-700 cursor-pointer select-none">
-                      Bypass user owner filter (Migrate all agents and notebooks in context)
+                    <label htmlFor="bypassAgentOwnerFilter" className="text-sm font-medium text-gray-700 cursor-pointer select-none">
+                      Bypass user owner filter for Agents (Migrate all agents in context)
                     </label>
                     <p className="text-xs text-gray-400 mt-1">
-                      Check this to display and backup all agents and notebooks you have access to. Shared/collaborator notebooks will be displayed with a "Shared?" badge, while owned notebooks will be labeled "Owner". If unchecked, shared notebooks and agents will be hidden.
+                      Check this to display and backup all low-code agents you have access to (bypasses WIF user-level owner filtering).
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2 border-t border-gray-50 pt-3">
+                  <input 
+                    type="checkbox" 
+                    id="bypassNotebookOwnerFilter"
+                    checked={!!userTabConfig.bypassNotebookOwnerFilter} 
+                    onChange={(e) => setUserTabConfig(prev => ({ ...prev, bypassNotebookOwnerFilter: e.target.checked }))} 
+                    className="mt-1 w-4 h-4 rounded text-indigo-600 border-gray-300 focus:ring-indigo-500"
+                  />
+                  <div>
+                    <label htmlFor="bypassNotebookOwnerFilter" className="text-sm font-medium text-gray-700 cursor-pointer select-none">
+                      Bypass user owner filter for Notebooks
+                    </label>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Check this to display and backup all notebooks you have access to. Shared/collaborator notebooks will be displayed with a "Shared?" badge, while owned notebooks will be labeled "Owner". If unchecked, shared notebooks will be hidden.
                     </p>
                   </div>
                 </div>
@@ -4821,20 +4853,41 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                 <div className="flex items-start gap-2">
                   <input 
                     type="checkbox" 
-                    id="adminBypassOwnerFilter" 
-                    checked={!!userTabConfig.bypassOwnerFilter} 
+                    id="adminBypassAgentOwnerFilter" 
+                    checked={!!userTabConfig.bypassAgentOwnerFilter} 
                     onChange={(e) => {
                       const checked = e.target.checked;
-                      setUserTabConfig(prev => ({ ...prev, bypassOwnerFilter: checked }));
+                      setUserTabConfig(prev => ({ ...prev, bypassAgentOwnerFilter: checked }));
                     }}
                     className="mt-0.5 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
                   />
                   <div>
-                    <label htmlFor="adminBypassOwnerFilter" className="text-xs text-gray-700 dark:text-white font-semibold cursor-pointer select-none">
-                      Bypass user owner filter (Migrate all agents and notebooks in context)
+                    <label htmlFor="adminBypassAgentOwnerFilter" className="text-xs text-gray-700 dark:text-white font-semibold cursor-pointer select-none">
+                      Bypass user owner filter for Agents (Migrate all agents in context)
                     </label>
                     <p className="text-[10px] text-gray-400 mt-0.5">
-                      Check this to display and migrate all accessible agents and notebooks. Shared notebooks will be marked as "Shared?" while owned ones are marked "Owner".
+                      Check this to display and migrate all low-code agents you have access to (bypasses WIF user-level owner filtering).
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="adminBypassNotebookOwnerFilter" 
+                    checked={!!userTabConfig.bypassNotebookOwnerFilter} 
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setUserTabConfig(prev => ({ ...prev, bypassNotebookOwnerFilter: checked }));
+                    }}
+                    className="mt-0.5 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
+                  />
+                  <div>
+                    <label htmlFor="adminBypassNotebookOwnerFilter" className="text-xs text-gray-700 dark:text-white font-semibold cursor-pointer select-none">
+                      Bypass user owner filter for Notebooks
+                    </label>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      Check this to display and migrate all notebooks you have access to. Shared/collaborator notebooks will be marked as "Shared?" while owned ones are marked "Owner". If unchecked, shared notebooks will be hidden.
                     </p>
                   </div>
                 </div>
