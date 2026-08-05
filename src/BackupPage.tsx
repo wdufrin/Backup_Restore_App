@@ -415,16 +415,47 @@ const isMemberCurrentUser = (member: string, userEmail: string, userSub: string,
   return false;
 };
 
-const isNotebookOwnedByUser = (notebook: any, userEmail: string, userSub: string, poolId?: string): boolean => {
-  if (notebook.metadata?.userRole) {
-    return notebook.metadata.userRole === 'PROJECT_ROLE_OWNER';
+const isNotebookOwnedByUser = (
+  notebook: any, 
+  userEmail: string, 
+  userSub: string, 
+  poolId?: string,
+  logFn?: (msg: string) => void
+): boolean => {
+  if (logFn) {
+    logFn(`[DEBUG] isNotebookOwnedByUser evaluation for "${notebook.title || notebook.name}":`);
+    logFn(`  - User Info: email="${userEmail}", sub="${userSub}", poolId="${poolId || ''}"`);
+    logFn(`  - Notebook Metadata: ${JSON.stringify(notebook.metadata || null)}`);
+    logFn(`  - Notebook IAM Policy: ${JSON.stringify(notebook.iamPolicy || null)}`);
   }
+  
+  if (notebook.metadata?.userRole) {
+    const isOwnerRole = notebook.metadata.userRole === 'PROJECT_ROLE_OWNER';
+    if (logFn) logFn(`  - Result from metadata.userRole: ${notebook.metadata.userRole} (isOwned = ${isOwnerRole})`);
+    return isOwnerRole;
+  }
+  
   if (notebook.iamPolicy && notebook.iamPolicy.bindings) {
     const ownerBinding = notebook.iamPolicy.bindings.find((b: any) => b.role === 'roles/discoveryengine.notebookOwner' || b.role === 'roles/owner');
-    if (ownerBinding && ownerBinding.members) {
-      return ownerBinding.members.some((member: string) => isMemberCurrentUser(member, userEmail, userSub, poolId));
+    if (ownerBinding) {
+      if (logFn) logFn(`  - Found Owner binding: ${JSON.stringify(ownerBinding)}`);
+      if (ownerBinding.members) {
+        const isMatch = ownerBinding.members.some((member: string) => {
+          const match = isMemberCurrentUser(member, userEmail, userSub, poolId);
+          if (logFn) logFn(`    - Checking member "${member}" against user info: match = ${match}`);
+          return match;
+        });
+        if (logFn) logFn(`  - Result from IAM bindings: isOwned = ${isMatch}`);
+        return isMatch;
+      }
+    } else {
+      if (logFn) logFn(`  - No owner roles found in IAM bindings (looked for roles/discoveryengine.notebookOwner or roles/owner).`);
     }
+  } else {
+    if (logFn) logFn(`  - No IAM policy bindings available to check.`);
   }
+  
+  if (logFn) logFn(`  - Result: isOwned = false`);
   return false;
 };
 
@@ -1761,7 +1792,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
               addLog(`  - Warning: Failed to fetch IAM policy for notebook ${notebookId}: ${policyErr.message}`);
             }
             const notebookWithPolicy = { ...rawNotebook, iamPolicy: policy };
-            isOwned = isNotebookOwnedByUser(notebookWithPolicy, userEmail, userSub, poolId);
+            isOwned = isNotebookOwnedByUser(notebookWithPolicy, userEmail, userSub, poolId, isDebugMode ? addLog : undefined);
             if (isDebugMode) {
               addLog(`[DEBUG] Notebook owner check (metadata): ${nb.title || nb.name}, isOwned = ${isOwned}`);
             }
@@ -2241,7 +2272,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
 
           let isOwned = true;
           if (!userTabConfig.bypassOwnerFilter) {
-            isOwned = isNotebookOwnedByUser(rawNotebook, userEmail, userSub, poolId);
+            isOwned = isNotebookOwnedByUser(rawNotebook, userEmail, userSub, poolId, isDebugMode ? addLog : undefined);
           }
           
           const cleanTitle = rawNotebook.title || rawNotebook.displayName || 'Restored Notebook';
