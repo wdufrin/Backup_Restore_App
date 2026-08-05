@@ -106,7 +106,6 @@ Create a custom role named `customBackupViewer` at the project level in **BOTH**
 - **`discoveryengine.engines.get`**
 - **`discoveryengine.engines.list`**
 - **`discoveryengine.notebooks.get`**
-- **`discoveryengine.notebooks.getIamPolicy`**
 - **`discoveryengine.notebooks.list`**
 - **`serviceusage.services.get`**
 - **`serviceusage.services.list`**
@@ -119,7 +118,7 @@ gcloud iam roles create customBackupViewer \
     --project="YOUR_PROJECT_ID" \
     --title="Discovery Engine Custom Backup Viewer" \
     --description="Permissions needed to list and read engines, assistants, agents, and notebooks for backup and restore operations." \
-    --permissions="discoveryengine.agents.get,discoveryengine.agents.getAgentView,discoveryengine.agents.getIamPolicy,discoveryengine.agents.list,discoveryengine.agents.manage,discoveryengine.assistants.get,discoveryengine.assistants.list,discoveryengine.collections.list,discoveryengine.engines.get,discoveryengine.engines.list,discoveryengine.notebooks.get,discoveryengine.notebooks.getIamPolicy,discoveryengine.notebooks.list,serviceusage.services.get,serviceusage.services.list,serviceusage.services.use" \
+    --permissions="discoveryengine.agents.get,discoveryengine.agents.getAgentView,discoveryengine.agents.getIamPolicy,discoveryengine.agents.list,discoveryengine.agents.manage,discoveryengine.assistants.get,discoveryengine.assistants.list,discoveryengine.collections.list,discoveryengine.engines.get,discoveryengine.engines.list,discoveryengine.notebooks.get,discoveryengine.notebooks.list,serviceusage.services.get,serviceusage.services.list,serviceusage.services.use" \
     --stage=GA
 ```
 

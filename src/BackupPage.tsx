@@ -426,37 +426,17 @@ const isNotebookOwnedByUser = (
     logFn(`[DEBUG] isNotebookOwnedByUser evaluation for "${notebook.title || notebook.name}":`);
     logFn(`  - User Info: email="${userEmail}", sub="${userSub}", poolId="${poolId || ''}"`);
     logFn(`  - Notebook Metadata: ${JSON.stringify(notebook.metadata || null)}`);
-    logFn(`  - Notebook IAM Policy: ${JSON.stringify(notebook.iamPolicy || null)}`);
   }
   
-  if (notebook.metadata?.userRole) {
-    const isOwnerRole = notebook.metadata.userRole === 'PROJECT_ROLE_OWNER';
-    if (logFn) logFn(`  - Result from metadata.userRole: ${notebook.metadata.userRole} (isOwned = ${isOwnerRole})`);
-    return isOwnerRole;
+  if (notebook.metadata?.userRole === 'PROJECT_ROLE_OWNER') {
+    if (logFn) logFn(`  - Result: User is Project Owner (isOwned = true)`);
+    return true;
   }
   
-  if (notebook.iamPolicy && notebook.iamPolicy.bindings) {
-    const ownerBinding = notebook.iamPolicy.bindings.find((b: any) => b.role === 'roles/discoveryengine.notebookOwner' || b.role === 'roles/owner');
-    if (ownerBinding) {
-      if (logFn) logFn(`  - Found Owner binding: ${JSON.stringify(ownerBinding)}`);
-      if (ownerBinding.members) {
-        const isMatch = ownerBinding.members.some((member: string) => {
-          const match = isMemberCurrentUser(member, userEmail, userSub, poolId);
-          if (logFn) logFn(`    - Checking member "${member}" against user info: match = ${match}`);
-          return match;
-        });
-        if (logFn) logFn(`  - Result from IAM bindings: isOwned = ${isMatch}`);
-        return isMatch;
-      }
-    } else {
-      if (logFn) logFn(`  - No owner roles found in IAM bindings (looked for roles/discoveryengine.notebookOwner or roles/owner).`);
-    }
-  } else {
-    if (logFn) logFn(`  - No IAM policy bindings available to check.`);
+  if (logFn) {
+    logFn(`  - Note: Notebook-level IAM policy checks are not supported by the API. Falling back to allowing access (isOwned = true) so that accessible notebooks can be selected in the modal.`);
   }
-  
-  if (logFn) logFn(`  - Result: isOwned = false`);
-  return false;
+  return true;
 };
 
 // --- Main Page Component ---
@@ -1784,28 +1764,14 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
         try {
           const rawNotebook = await api.getNotebook(sourceConfig, notebookId);
           let isOwned = true;
-          let policy = null;
           if (!userTabConfig.bypassOwnerFilter) {
-            try {
-              policy = await api.getNotebookIamPolicy(rawNotebook.name, sourceConfig);
-            } catch (policyErr: any) {
-              addLog(`  - Warning: Failed to fetch IAM policy for notebook ${notebookId}: ${policyErr.message}`);
-            }
-            const notebookWithPolicy = { ...rawNotebook, iamPolicy: policy };
-            isOwned = isNotebookOwnedByUser(notebookWithPolicy, userEmail, userSub, poolId, isDebugMode ? addLog : undefined);
+            isOwned = isNotebookOwnedByUser(rawNotebook, userEmail, userSub, poolId, isDebugMode ? addLog : undefined);
             if (isDebugMode) {
               addLog(`[DEBUG] Notebook owner check (metadata): ${nb.title || nb.name}, isOwned = ${isOwned}`);
-            }
-          } else {
-            try {
-              policy = await api.getNotebookIamPolicy(rawNotebook.name, sourceConfig);
-            } catch (policyErr: any) {
-              // Ignore error
             }
           }
 
           if (isOwned) {
-            rawNotebook.iamPolicy = policy;
                         // Fetch sources
             const fullSources = [];
             for (const source of (rawNotebook.sources || [])) {
@@ -2259,14 +2225,6 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             addLog(`  - Warning: Failed to fetch artifacts for notebook ${notebookId}: ${artErr.message}`);
           }
           rawNotebook.artifacts = fullArtifacts;
-
-          let policy = null;
-          try {
-            policy = await api.getNotebookIamPolicy(rawNotebook.name, sourceConfig);
-          } catch (policyErr: any) {
-            addLog(`  - Warning: Failed to fetch IAM policy for notebook ${notebookId}: ${policyErr.message}`);
-          }
-          rawNotebook.iamPolicy = policy;
 
           fullBackupNotebooks.push(rawNotebook);
 
