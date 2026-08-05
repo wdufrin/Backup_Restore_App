@@ -434,9 +434,9 @@ const isNotebookOwnedByUser = (
   }
   
   if (logFn) {
-    logFn(`  - Note: Notebook-level IAM policy checks are not supported by the API. Falling back to allowing access (isOwned = true) so that accessible notebooks can be selected in the modal.`);
+    logFn(`  - Result: User is not Project Owner (isOwned = false)`);
   }
-  return true;
+  return false;
 };
 
 // --- Main Page Component ---
@@ -1763,15 +1763,14 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
         const notebookId = nb.name.split('/').pop()!;
         try {
           const rawNotebook = await api.getNotebook(sourceConfig, notebookId);
-          let isOwned = true;
-          if (!userTabConfig.bypassOwnerFilter) {
-            isOwned = isNotebookOwnedByUser(rawNotebook, userEmail, userSub, poolId, isDebugMode ? addLog : undefined);
-            if (isDebugMode) {
-              addLog(`[DEBUG] Notebook owner check (metadata): ${nb.title || nb.name}, isOwned = ${isOwned}`);
-            }
+          const isActualOwner = isNotebookOwnedByUser(rawNotebook, userEmail, userSub, poolId, isDebugMode ? addLog : undefined);
+          if (isDebugMode) {
+            addLog(`[DEBUG] Notebook owner check (metadata): ${nb.title || nb.name}, isOwned = ${isActualOwner}`);
           }
 
-          if (isOwned) {
+          const shouldInclude = isActualOwner || userTabConfig.bypassOwnerFilter;
+          if (shouldInclude) {
+            rawNotebook.isOwned = isActualOwner;
                         // Fetch sources
             const fullSources = [];
             for (const source of (rawNotebook.sources || [])) {
@@ -1861,7 +1860,9 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
     const notebookItems: SelectableItem[] = userNotebooks.map(nb => ({
       name: nb.name,
       displayName: nb.title || 'Unnamed Notebook',
-      agentType: 'Notebook'
+      agentType: 'Notebook',
+      category: nb.isOwned ? 'core' : 'optional',
+      isOwned: nb.isOwned
     }));
 
     setSelectionModalItems([...agentItems, ...notebookItems]);
@@ -2225,25 +2226,26 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             addLog(`  - Warning: Failed to fetch artifacts for notebook ${notebookId}: ${artErr.message}`);
           }
           rawNotebook.artifacts = fullArtifacts;
+          const isActualOwner = isNotebookOwnedByUser(rawNotebook, userEmail, userSub, poolId, isDebugMode ? addLog : undefined);
+          const shouldInclude = isActualOwner || userTabConfig.bypassOwnerFilter;
 
-          fullBackupNotebooks.push(rawNotebook);
+          if (shouldInclude) {
+            rawNotebook.isOwned = isActualOwner;
+            fullBackupNotebooks.push(rawNotebook);
 
-          let isOwned = true;
-          if (!userTabConfig.bypassOwnerFilter) {
-            isOwned = isNotebookOwnedByUser(rawNotebook, userEmail, userSub, poolId, isDebugMode ? addLog : undefined);
+            const cleanTitle = rawNotebook.title || rawNotebook.displayName || 'Restored Notebook';
+            const exists = targetNotebooks.some(n => n.title === cleanTitle);
+
+            selectableNotebooks.push({
+              name: rawNotebook.name,
+              displayName: cleanTitle,
+              agentType: 'Notebook',
+              disabled: exists,
+              disabledReason: exists ? 'Already exists in target' : undefined,
+              category: isActualOwner ? 'core' : 'optional',
+              isOwned: isActualOwner
+            });
           }
-          
-          const cleanTitle = rawNotebook.title || rawNotebook.displayName || 'Restored Notebook';
-          const exists = targetNotebooks.some(n => n.title === cleanTitle);
-
-          selectableNotebooks.push({
-            name: rawNotebook.name,
-            displayName: cleanTitle,
-            agentType: 'Notebook',
-            disabled: exists,
-            disabledReason: exists ? 'Already exists in target' : undefined,
-            category: isOwned ? 'core' : 'optional'
-          });
         } catch (nbErr: any) {
           addLog(`  - Error fetching details for notebook ${notebookId}: ${nbErr.message}`);
         }
