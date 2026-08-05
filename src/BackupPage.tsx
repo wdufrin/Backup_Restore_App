@@ -1753,14 +1753,28 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
         try {
           const rawNotebook = await api.getNotebook(sourceConfig, notebookId);
           let isOwned = true;
+          let policy = null;
           if (!userTabConfig.bypassOwnerFilter) {
-            isOwned = isNotebookOwnedByUser(rawNotebook, userEmail, userSub, poolId);
+            try {
+              policy = await api.getNotebookIamPolicy(rawNotebook.name, sourceConfig);
+            } catch (policyErr: any) {
+              addLog(`  - Warning: Failed to fetch IAM policy for notebook ${notebookId}: ${policyErr.message}`);
+            }
+            const notebookWithPolicy = { ...rawNotebook, iamPolicy: policy };
+            isOwned = isNotebookOwnedByUser(notebookWithPolicy, userEmail, userSub, poolId);
             if (isDebugMode) {
               addLog(`[DEBUG] Notebook owner check (metadata): ${nb.title || nb.name}, isOwned = ${isOwned}`);
+            }
+          } else {
+            try {
+              policy = await api.getNotebookIamPolicy(rawNotebook.name, sourceConfig);
+            } catch (policyErr: any) {
+              // Ignore error
             }
           }
 
           if (isOwned) {
+            rawNotebook.iamPolicy = policy;
                         // Fetch sources
             const fullSources = [];
             for (const source of (rawNotebook.sources || [])) {
@@ -2214,6 +2228,14 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             addLog(`  - Warning: Failed to fetch artifacts for notebook ${notebookId}: ${artErr.message}`);
           }
           rawNotebook.artifacts = fullArtifacts;
+
+          let policy = null;
+          try {
+            policy = await api.getNotebookIamPolicy(rawNotebook.name, sourceConfig);
+          } catch (policyErr: any) {
+            addLog(`  - Warning: Failed to fetch IAM policy for notebook ${notebookId}: ${policyErr.message}`);
+          }
+          rawNotebook.iamPolicy = policy;
 
           fullBackupNotebooks.push(rawNotebook);
 

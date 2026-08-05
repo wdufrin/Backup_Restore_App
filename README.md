@@ -106,6 +106,7 @@ Create a custom role named `customBackupViewer` at the project level in **BOTH**
 - **`discoveryengine.engines.get`**
 - **`discoveryengine.engines.list`**
 - **`discoveryengine.notebooks.get`**
+- **`discoveryengine.notebooks.getIamPolicy`**
 - **`discoveryengine.notebooks.list`**
 - **`serviceusage.services.get`**
 - **`serviceusage.services.list`**
@@ -118,7 +119,7 @@ gcloud iam roles create customBackupViewer \
     --project="YOUR_PROJECT_ID" \
     --title="Discovery Engine Custom Backup Viewer" \
     --description="Permissions needed to list and read engines, assistants, agents, and notebooks for backup and restore operations." \
-    --permissions="discoveryengine.agents.get,discoveryengine.agents.getAgentView,discoveryengine.agents.getIamPolicy,discoveryengine.agents.list,discoveryengine.agents.manage,discoveryengine.assistants.get,discoveryengine.assistants.list,discoveryengine.collections.list,discoveryengine.engines.get,discoveryengine.engines.list,discoveryengine.notebooks.get,discoveryengine.notebooks.list,serviceusage.services.get,serviceusage.services.list,serviceusage.services.use" \
+    --permissions="discoveryengine.agents.get,discoveryengine.agents.getAgentView,discoveryengine.agents.getIamPolicy,discoveryengine.agents.list,discoveryengine.agents.manage,discoveryengine.assistants.get,discoveryengine.assistants.list,discoveryengine.collections.list,discoveryengine.engines.get,discoveryengine.engines.list,discoveryengine.notebooks.get,discoveryengine.notebooks.getIamPolicy,discoveryengine.notebooks.list,serviceusage.services.get,serviceusage.services.list,serviceusage.services.use" \
     --stage=GA
 ```
 
@@ -268,9 +269,9 @@ Open `http://localhost:5173`.
 ## 7. Production Deployment Guide
 
 ### Container Build
-Build a static web server Docker image:
+Build a static web server Docker image. Note that you should pass `VITE_APP_VERSION` as a build argument to specify the version displayed in the UI (e.g. including git SHA or build tags):
 ```bash
-docker build -t gcr.io/YOUR_PROJECT_ID/backup-restore-app:latest .
+docker build --build-arg VITE_APP_VERSION="1.0.0-$(git rev-parse --short HEAD 2>/dev/null || echo 'custom')" -t gcr.io/YOUR_PROJECT_ID/backup-restore-app:latest .
 ```
 
 ### Option A: Cloud Run Deployment
