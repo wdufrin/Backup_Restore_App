@@ -1249,7 +1249,7 @@ export const getNotebookIamPolicy = async (name: string, config: Config) => {
     const { projectId, appLocation } = config;
     const baseUrl = getDiscoveryEngineUrl(appLocation);
     const url = `${baseUrl}/${DISCOVERY_API_VERSION}/${name}:getIamPolicy`;
-    return gapiRequest<any>(url, 'GET', projectId, undefined, undefined, config.accessToken ? { 'Authorization': `Bearer ${config.accessToken}` } : undefined);
+    return gapiRequest<any>(url, 'POST', projectId, undefined, {}, config.accessToken ? { 'Authorization': `Bearer ${config.accessToken}` } : undefined);
 };
 
 
