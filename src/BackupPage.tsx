@@ -493,6 +493,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
     targetLocation: string;
     targetAppId: string;
     targetAppUrl: string;
+    targetCid?: string;
     bypassAgentOwnerFilter?: boolean;
     bypassNotebookOwnerFilter?: boolean;
     enableAgentViewFallback?: boolean;
@@ -592,6 +593,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
       VITE_TARGET_APP_URL: runtime.VITE_TARGET_APP_URL || import.meta.env.VITE_TARGET_APP_URL,
       VITE_TARGET_CID: runtime.VITE_TARGET_CID || import.meta.env.VITE_TARGET_CID,
       VITE_BYPASS_OWNER_FILTER: runtime.VITE_BYPASS_OWNER_FILTER !== undefined ? runtime.VITE_BYPASS_OWNER_FILTER : import.meta.env.VITE_BYPASS_OWNER_FILTER,
+      VITE_BYPASS_AGENT_OWNER_FILTER: runtime.VITE_BYPASS_AGENT_OWNER_FILTER !== undefined ? runtime.VITE_BYPASS_AGENT_OWNER_FILTER : import.meta.env.VITE_BYPASS_AGENT_OWNER_FILTER,
+      VITE_BYPASS_NOTEBOOK_OWNER_FILTER: runtime.VITE_BYPASS_NOTEBOOK_OWNER_FILTER !== undefined ? runtime.VITE_BYPASS_NOTEBOOK_OWNER_FILTER : import.meta.env.VITE_BYPASS_NOTEBOOK_OWNER_FILTER,
       VITE_FORCE_DOWNLOAD_BACKUP: runtime.VITE_FORCE_DOWNLOAD_BACKUP !== undefined ? runtime.VITE_FORCE_DOWNLOAD_BACKUP : import.meta.env.VITE_FORCE_DOWNLOAD_BACKUP,
       VITE_ENABLE_AGENT_VIEW_FALLBACK: runtime.VITE_ENABLE_AGENT_VIEW_FALLBACK !== undefined ? runtime.VITE_ENABLE_AGENT_VIEW_FALLBACK : import.meta.env.VITE_ENABLE_AGENT_VIEW_FALLBACK,
       VITE_DATASTORE_MAPPING: runtime.VITE_DATASTORE_MAPPING || import.meta.env.VITE_DATASTORE_MAPPING,
