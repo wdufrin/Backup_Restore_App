@@ -571,7 +571,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
     enableAgentViewFallback?: boolean;
     forceDownloadBackup?: boolean;
     autoConvertFailedNotes?: boolean;
-    disableCaseSensitivity?: boolean;
+    disableAgentCaseSensitivity?: boolean;
+    disableNotebookCaseSensitivity?: boolean;
   }
 
   const [userTabConfig, setUserTabConfig] = useState<UserTabConfig>(() => {
@@ -582,7 +583,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
         ...parsed,
         bypassAgentOwnerFilter: parsed.bypassAgentOwnerFilter !== undefined ? parsed.bypassAgentOwnerFilter : parsed.bypassOwnerFilter,
         bypassNotebookOwnerFilter: parsed.bypassNotebookOwnerFilter !== undefined ? parsed.bypassNotebookOwnerFilter : parsed.bypassOwnerFilter,
-        disableCaseSensitivity: parsed.disableCaseSensitivity !== undefined ? parsed.disableCaseSensitivity : true,
+        disableAgentCaseSensitivity: parsed.disableAgentCaseSensitivity !== undefined ? parsed.disableAgentCaseSensitivity : true,
+        disableNotebookCaseSensitivity: parsed.disableNotebookCaseSensitivity !== undefined ? parsed.disableNotebookCaseSensitivity : true,
       };
     }
     const base = { ...import.meta.env, ...runtimeConfig };
@@ -600,7 +602,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
       enableAgentViewFallback: base.VITE_ENABLE_AGENT_VIEW_FALLBACK !== 'false', // Default to true
       forceDownloadBackup: base.VITE_FORCE_DOWNLOAD_BACKUP === 'true',
       autoConvertFailedNotes: base.VITE_AUTO_CONVERT_FAILED_NOTES === 'true', // Default to false
-      disableCaseSensitivity: base.VITE_DISABLE_CASE_SENSITIVITY !== 'false', // Default to true
+      disableAgentCaseSensitivity: base.VITE_DISABLE_AGENT_CASE_SENSITIVITY !== 'false', // Default to true
+      disableNotebookCaseSensitivity: base.VITE_DISABLE_NOTEBOOK_CASE_SENSITIVITY !== 'false', // Default to true
     };
   });
   const [isUserConfigModalOpen, setIsUserConfigModalOpen] = useState(false);
@@ -672,7 +675,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
       VITE_BYPASS_NOTEBOOK_OWNER_FILTER: runtime.VITE_BYPASS_NOTEBOOK_OWNER_FILTER !== undefined ? runtime.VITE_BYPASS_NOTEBOOK_OWNER_FILTER : import.meta.env.VITE_BYPASS_NOTEBOOK_OWNER_FILTER,
       VITE_FORCE_DOWNLOAD_BACKUP: runtime.VITE_FORCE_DOWNLOAD_BACKUP !== undefined ? runtime.VITE_FORCE_DOWNLOAD_BACKUP : import.meta.env.VITE_FORCE_DOWNLOAD_BACKUP,
       VITE_ENABLE_AGENT_VIEW_FALLBACK: runtime.VITE_ENABLE_AGENT_VIEW_FALLBACK !== undefined ? runtime.VITE_ENABLE_AGENT_VIEW_FALLBACK : import.meta.env.VITE_ENABLE_AGENT_VIEW_FALLBACK,
-      VITE_DISABLE_CASE_SENSITIVITY: runtime.VITE_DISABLE_CASE_SENSITIVITY !== undefined ? runtime.VITE_DISABLE_CASE_SENSITIVITY : import.meta.env.VITE_DISABLE_CASE_SENSITIVITY,
+      VITE_DISABLE_AGENT_CASE_SENSITIVITY: runtime.VITE_DISABLE_AGENT_CASE_SENSITIVITY !== undefined ? runtime.VITE_DISABLE_AGENT_CASE_SENSITIVITY : import.meta.env.VITE_DISABLE_AGENT_CASE_SENSITIVITY,
+      VITE_DISABLE_NOTEBOOK_CASE_SENSITIVITY: runtime.VITE_DISABLE_NOTEBOOK_CASE_SENSITIVITY !== undefined ? runtime.VITE_DISABLE_NOTEBOOK_CASE_SENSITIVITY : import.meta.env.VITE_DISABLE_NOTEBOOK_CASE_SENSITIVITY,
       VITE_DATASTORE_MAPPING: runtime.VITE_DATASTORE_MAPPING || import.meta.env.VITE_DATASTORE_MAPPING,
       VITE_COLLECTION_MAPPING: runtime.VITE_COLLECTION_MAPPING || import.meta.env.VITE_COLLECTION_MAPPING,
     };
@@ -691,7 +695,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
         bypassNotebookOwnerFilter: base.VITE_BYPASS_NOTEBOOK_OWNER_FILTER === 'true' || base.VITE_BYPASS_OWNER_FILTER === 'true',
         enableAgentViewFallback: base.VITE_ENABLE_AGENT_VIEW_FALLBACK !== 'false',
         forceDownloadBackup: base.VITE_FORCE_DOWNLOAD_BACKUP === 'true',
-        disableCaseSensitivity: base.VITE_DISABLE_CASE_SENSITIVITY !== 'false',
+        disableAgentCaseSensitivity: base.VITE_DISABLE_AGENT_CASE_SENSITIVITY !== 'false',
+        disableNotebookCaseSensitivity: base.VITE_DISABLE_NOTEBOOK_CASE_SENSITIVITY !== 'false',
       });
     }
     
@@ -968,7 +973,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
     content += `VITE_MIGRATE_NOTEBOOKS=${shouldMigrateNotebooks}\n`;
     content += `VITE_FORCE_DOWNLOAD_BACKUP=${userTabConfig.forceDownloadBackup || false}\n`;
     content += `VITE_AUTO_CONVERT_FAILED_NOTES=${userTabConfig.autoConvertFailedNotes !== false}\n`;
-    content += `VITE_DISABLE_CASE_SENSITIVITY=${userTabConfig.disableCaseSensitivity !== false}\n\n`;
+    content += `VITE_DISABLE_AGENT_CASE_SENSITIVITY=${userTabConfig.disableAgentCaseSensitivity !== false}\n`;
+    content += `VITE_DISABLE_NOTEBOOK_CASE_SENSITIVITY=${userTabConfig.disableNotebookCaseSensitivity !== false}\n\n`;
 
     content += `# --- Mappings ---\n`;
     content += `VITE_DATASTORE_MAPPING='${JSON.stringify(datastoreMapping)}'\n`;
@@ -1050,7 +1056,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
             bypassNotebookOwnerFilter: config.VITE_BYPASS_NOTEBOOK_OWNER_FILTER === 'true' || config.VITE_BYPASS_OWNER_FILTER === 'true',
             enableAgentViewFallback: config.VITE_ENABLE_AGENT_VIEW_FALLBACK !== 'false', // Default to true if missing/not set to false
             forceDownloadBackup: config.VITE_FORCE_DOWNLOAD_BACKUP === 'true',
-            disableCaseSensitivity: config.VITE_DISABLE_CASE_SENSITIVITY !== 'false', // Default to true
+            disableAgentCaseSensitivity: config.VITE_DISABLE_AGENT_CASE_SENSITIVITY !== 'false', // Default to true
+            disableNotebookCaseSensitivity: config.VITE_DISABLE_NOTEBOOK_CASE_SENSITIVITY !== 'false', // Default to true
           };
           setUserTabConfig(newUserTabConfig);
 
@@ -1177,7 +1184,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
       enableAgentViewFallback: base.VITE_ENABLE_AGENT_VIEW_FALLBACK !== 'false',
       forceDownloadBackup: base.VITE_FORCE_DOWNLOAD_BACKUP === 'true',
       autoConvertFailedNotes: base.VITE_AUTO_CONVERT_FAILED_NOTES === 'true',
-      disableCaseSensitivity: base.VITE_DISABLE_CASE_SENSITIVITY !== 'false',
+      disableAgentCaseSensitivity: base.VITE_DISABLE_AGENT_CASE_SENSITIVITY !== 'false',
+      disableNotebookCaseSensitivity: base.VITE_DISABLE_NOTEBOOK_CASE_SENSITIVITY !== 'false',
     });
     setFeatureFlags({
       idpChangeEnabled: base.VITE_IDP_CHANGE_ENABLED === 'true',
@@ -1801,7 +1809,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             }
 
             const agentWithPolicy = { ...fullAgent, iamPolicy: policy, agentType: 'Low Code', agentFiles };
-            const isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId, userTabConfig.disableCaseSensitivity);
+            const isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId, userTabConfig.disableAgentCaseSensitivity);
             (agentWithPolicy as any).category = isOwned ? 'core' : 'optional';
             userAgents.push(agentWithPolicy);
           } catch (e) {
@@ -1860,7 +1868,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
         const notebookId = nb.name.split('/').pop()!;
         try {
           const rawNotebook = await api.getNotebook(sourceConfig, notebookId);
-          const isActualOwner = isNotebookOwnedByUser(rawNotebook, userEmail, userSub, poolId, isDebugMode ? addLog : undefined, userTabConfig.disableCaseSensitivity);
+          const isActualOwner = isNotebookOwnedByUser(rawNotebook, userEmail, userSub, poolId, isDebugMode ? addLog : undefined, userTabConfig.disableNotebookCaseSensitivity);
           if (isDebugMode) {
             addLog(`[DEBUG] Notebook owner check (metadata): ${nb.title || nb.name}, isOwned = ${isActualOwner}`);
           }
@@ -2205,7 +2213,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                 const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
                 agentWithPolicy = { ...fullAgent, iamPolicy: policy };
                 
-                isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId, userTabConfig.disableCaseSensitivity);
+                isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId, userTabConfig.disableAgentCaseSensitivity);
                 
                 if (policy && policy.bindings) {
                   const ownerBinding = policy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
@@ -2323,7 +2331,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             addLog(`  - Warning: Failed to fetch artifacts for notebook ${notebookId}: ${artErr.message}`);
           }
           rawNotebook.artifacts = fullArtifacts;
-          const isActualOwner = isNotebookOwnedByUser(rawNotebook, userEmail, userSub, poolId, isDebugMode ? addLog : undefined, userTabConfig.disableCaseSensitivity);
+          const isActualOwner = isNotebookOwnedByUser(rawNotebook, userEmail, userSub, poolId, isDebugMode ? addLog : undefined, userTabConfig.disableNotebookCaseSensitivity);
           const shouldInclude = isActualOwner || userTabConfig.bypassNotebookOwnerFilter;
 
           if (shouldInclude) {
@@ -2863,8 +2871,8 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
 
               if (binding.members) {
                 const filteredMembers = binding.members.filter((member: string) => {
-                  return !isMemberCurrentUser(member, userEmail || '', userSub || '', poolId, userTabConfig.disableCaseSensitivity) &&
-                         (!pendingBackupData?.userEmail || !isMemberCurrentUser(member, pendingBackupData.userEmail, '', poolId, userTabConfig.disableCaseSensitivity));
+                  return !isMemberCurrentUser(member, userEmail || '', userSub || '', poolId, userTabConfig.disableAgentCaseSensitivity) &&
+                         (!pendingBackupData?.userEmail || !isMemberCurrentUser(member, pendingBackupData.userEmail, '', poolId, userTabConfig.disableAgentCaseSensitivity));
                 });
                 sharedWith.push(...filteredMembers);
               }
@@ -2928,8 +2936,8 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
 
               if (binding.members) {
                 const filteredMembers = binding.members.filter((member: string) => {
-                  return !isMemberCurrentUser(member, userEmail || '', userSub || '', poolId, userTabConfig.disableCaseSensitivity) &&
-                         (!pendingBackupData?.userEmail || !isMemberCurrentUser(member, pendingBackupData.userEmail, '', poolId, userTabConfig.disableCaseSensitivity));
+                  return !isMemberCurrentUser(member, userEmail || '', userSub || '', poolId, userTabConfig.disableNotebookCaseSensitivity) &&
+                         (!pendingBackupData?.userEmail || !isMemberCurrentUser(member, pendingBackupData.userEmail, '', poolId, userTabConfig.disableNotebookCaseSensitivity));
                 });
                 sharedWith.push(...filteredMembers);
               }
@@ -4978,20 +4986,41 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                 <div className="flex items-start gap-2">
                   <input 
                     type="checkbox" 
-                    id="adminDisableCaseSensitivity" 
-                    checked={!!userTabConfig.disableCaseSensitivity} 
+                    id="adminDisableAgentCaseSensitivity" 
+                    checked={!!userTabConfig.disableAgentCaseSensitivity} 
                     onChange={(e) => {
                       const checked = e.target.checked;
-                      setUserTabConfig(prev => ({ ...prev, disableCaseSensitivity: checked }));
+                      setUserTabConfig(prev => ({ ...prev, disableAgentCaseSensitivity: checked }));
                     }}
                     className="mt-0.5 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
                   />
                   <div>
-                    <label htmlFor="adminDisableCaseSensitivity" className="text-xs text-gray-700 dark:text-white font-semibold cursor-pointer select-none">
-                      Disable Case Sensitivity for Owner Check
+                    <label htmlFor="adminDisableAgentCaseSensitivity" className="text-xs text-gray-700 dark:text-white font-semibold cursor-pointer select-none">
+                      Disable Case Sensitivity for Agent Owner Check
                     </label>
                     <p className="text-[10px] text-gray-400 mt-0.5">
-                      When checked, email comparisons for ownership verification will ignore case capitalization (e.g. matching 'AzzoliniG@coned.com' with 'azzolinig@coned.com').
+                      When checked, email comparisons for agent ownership checks will ignore capitalization.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="adminDisableNotebookCaseSensitivity" 
+                    checked={!!userTabConfig.disableNotebookCaseSensitivity} 
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setUserTabConfig(prev => ({ ...prev, disableNotebookCaseSensitivity: checked }));
+                    }}
+                    className="mt-0.5 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
+                  />
+                  <div>
+                    <label htmlFor="adminDisableNotebookCaseSensitivity" className="text-xs text-gray-700 dark:text-white font-semibold cursor-pointer select-none">
+                      Disable Case Sensitivity for Notebook Owner Check
+                    </label>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      When checked, email comparisons for notebook ownership checks will ignore capitalization.
                     </p>
                   </div>
                 </div>

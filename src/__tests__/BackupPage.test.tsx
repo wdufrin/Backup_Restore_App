@@ -137,8 +137,40 @@ describe('BackupPage Component - Env, Inputs & Outputs', () => {
     const saveBtn = screen.getByRole('button', { name: /^Save$/i });
     fireEvent.click(saveBtn);
 
-    // Verify localStorage updates
     expect(window.localStorage.getItem('agentspace-shouldMigrateAgents')).toBe('false');
+  });
+
+  it('correctly loads and toggles case sensitivity settings in admin view', async () => {
+    window.history.pushState({}, '', '?admin=true');
+    const runtimeConfig = {
+      VITE_DISABLE_AGENT_CASE_SENSITIVITY: 'false',
+      VITE_DISABLE_NOTEBOOK_CASE_SENSITIVITY: 'true',
+    };
+
+    render(<BackupPage {...mockProps} runtimeConfig={runtimeConfig} />);
+
+    // Switch to Admin View
+    const adminTab = screen.getByRole('button', { name: /Admin View/i });
+    fireEvent.click(adminTab);
+
+    // Verify checkbox initial states reflect overrides
+    const agentCaseSensitivityCheckbox = screen.getByLabelText(/Disable Case Sensitivity for Agent Owner Check/i) as HTMLInputElement;
+    const notebookCaseSensitivityCheckbox = screen.getByLabelText(/Disable Case Sensitivity for Notebook Owner Check/i) as HTMLInputElement;
+
+    expect(agentCaseSensitivityCheckbox.checked).toBe(false);
+    expect(notebookCaseSensitivityCheckbox.checked).toBe(true);
+
+    // Toggle them
+    fireEvent.click(agentCaseSensitivityCheckbox);
+    expect(agentCaseSensitivityCheckbox.checked).toBe(true);
+
+    // Save and check localStorage
+    const saveBtn = screen.getByRole('button', { name: /^Save$/i });
+    fireEvent.click(saveBtn);
+
+    const savedConfig = JSON.parse(window.localStorage.getItem('agentspace-userTabConfig') || '{}');
+    expect(savedConfig.disableAgentCaseSensitivity).toBe(true);
+    expect(savedConfig.disableNotebookCaseSensitivity).toBe(true);
   });
 
   it('generates a valid Backup JSON payload matching the expected output format', async () => {
