@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import BackupPage from '../BackupPage';
+import BackupPage, { isAgentOwnedByUser, isMemberCurrentUser, isNotebookOwnedByUser } from '../BackupPage';
 import * as api from '../services/apiService';
 
 // Mock localStorage and sessionStorage
@@ -286,6 +286,73 @@ describe('BackupPage Component - Env, Inputs & Outputs', () => {
         expect.any(Object), // targetConfig
         expect.objectContaining({ title: 'My Notebook 1' })
       );
+    });
+  });
+
+  describe('Ownership Helper Functions - Case Sensitivity Checks', () => {
+    describe('isMemberCurrentUser', () => {
+      it('correctly matches email case-sensitively when disableCaseSensitivity is false', () => {
+        const member = 'user:azzoliniG@coned.com';
+        expect(isMemberCurrentUser(member, 'AzzoliniG@coned.com', 'some-sub', '', false)).toBe(false);
+        expect(isMemberCurrentUser(member, 'azzoliniG@coned.com', 'some-sub', '', false)).toBe(true);
+      });
+
+      it('correctly matches email case-insensitively when disableCaseSensitivity is true', () => {
+        const member = 'user:azzoliniG@coned.com';
+        expect(isMemberCurrentUser(member, 'AzzoliniG@coned.com', 'some-sub', '', true)).toBe(true);
+      });
+    });
+
+    describe('isAgentOwnedByUser', () => {
+      const mockAgent = {
+        iamPolicy: {
+          bindings: [
+            {
+              role: 'roles/discoveryengine.agentOwner',
+              members: ['user:azzoliniG@coned.com']
+            }
+          ]
+        }
+      };
+
+      it('correctly matches email case-sensitively when disableCaseSensitivity is false', () => {
+        expect(isAgentOwnedByUser(mockAgent, 'AzzoliniG@coned.com', 'some-sub', '', false)).toBe(false);
+        expect(isAgentOwnedByUser(mockAgent, 'azzoliniG@coned.com', 'some-sub', '', false)).toBe(true);
+      });
+
+      it('correctly matches email case-insensitively when disableCaseSensitivity is true', () => {
+        expect(isAgentOwnedByUser(mockAgent, 'AzzoliniG@coned.com', 'some-sub', '', true)).toBe(true);
+      });
+    });
+
+    describe('isNotebookOwnedByUser', () => {
+      const mockNotebook = {
+        title: 'Test Notebook',
+        owner: 'azzoliniG@coned.com',
+        metadata: {
+          isShared: true
+        }
+      };
+
+      it('correctly matches email case-sensitively when disableCaseSensitivity is false', () => {
+        expect(isNotebookOwnedByUser(mockNotebook, 'AzzoliniG@coned.com', 'some-sub', '', undefined, false)).toBe(false);
+        expect(isNotebookOwnedByUser(mockNotebook, 'azzoliniG@coned.com', 'some-sub', '', undefined, false)).toBe(true);
+      });
+
+      it('correctly matches email case-insensitively when disableCaseSensitivity is true', () => {
+        expect(isNotebookOwnedByUser(mockNotebook, 'AzzoliniG@coned.com', 'some-sub', '', undefined, true)).toBe(true);
+      });
+
+      it('falls back to true if notebook is not shared, regardless of email casing or setting', () => {
+        const privateNotebook = {
+          title: 'Private Notebook',
+          metadata: {
+            isShared: false
+          }
+        };
+        expect(isNotebookOwnedByUser(privateNotebook, 'AzzoliniG@coned.com', 'some-sub', '', undefined, false)).toBe(true);
+        expect(isNotebookOwnedByUser(privateNotebook, 'another-user@coned.com', 'some-sub', '', undefined, true)).toBe(true);
+      });
     });
   });
 });

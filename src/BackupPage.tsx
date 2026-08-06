@@ -334,7 +334,13 @@ const checkAgentCollision = async (
   return { disabled: false };
 };
 
-const isAgentOwnedByUser = (agent: any, userEmail: string, userSub: string, poolId?: string): boolean => {
+export const isAgentOwnedByUser = (
+  agent: any, 
+  userEmail: string, 
+  userSub: string, 
+  poolId?: string,
+  disableCaseSensitivity: boolean = false
+): boolean => {
   let owner = "N/A";
   let fullMember = "";
   if (agent.iamPolicy && agent.iamPolicy.bindings) {
@@ -345,8 +351,19 @@ const isAgentOwnedByUser = (agent: any, userEmail: string, userSub: string, pool
     }
   }
   
+  // Helper for comparing emails/strings based on case sensitivity setting
+  const compareEmails = (a: string, b: string): boolean => {
+    if (!a || !b) return false;
+    return disableCaseSensitivity ? a.toLowerCase() === b.toLowerCase() : a === b;
+  };
+
+  const includesEmail = (str: string, email: string): boolean => {
+    if (!str || !email) return false;
+    return disableCaseSensitivity ? str.toLowerCase().includes(email.toLowerCase()) : str.includes(email);
+  };
+  
   // 1. Match by direct email
-  if (owner === userEmail) return true;
+  if (userEmail && compareEmails(owner, userEmail)) return true;
   
   // 2. Match by WIF subject ID if available
   if (userSub && owner === userSub) return true;
@@ -361,7 +378,7 @@ const isAgentOwnedByUser = (agent: any, userEmail: string, userSub: string, pool
   for (const key of definitionKeys) {
     const definition = (agent as any)[key];
     if (definition && definition.owner) {
-      if (definition.owner === userEmail) return true;
+      if (userEmail && compareEmails(definition.owner, userEmail)) return true;
       if (userSub && definition.owner === userSub) return true;
       if (userSub && (definition.owner.startsWith('principal://') || definition.owner.startsWith('principalSet://'))) {
         if (definition.owner.includes('/subject/') && definition.owner.split('/subject/').pop() === userSub) return true;
@@ -379,18 +396,23 @@ const isAgentOwnedByUser = (agent: any, userEmail: string, userSub: string, pool
 
   // 5. Smart prefix-based match (e.g., matching Google user 'wdufrin' with WIF principal 'admin@wdufrin.allostrat.com')
   if (userEmail) {
-    const prefix = userEmail.split('@')[0].toLowerCase();
+    const prefix = disableCaseSensitivity ? userEmail.split('@')[0].toLowerCase() : userEmail.split('@')[0];
     if (prefix && prefix.length > 2) {
-      if (owner && owner.toLowerCase().includes(prefix)) return true;
-      if (fullMember && fullMember.toLowerCase().includes(prefix)) return true;
-      if (agent.ownerDisplayName && agent.ownerDisplayName.toLowerCase().includes(prefix)) return true;
-      if (agent.ownerUserPrincipal && agent.ownerUserPrincipal.toLowerCase().includes(prefix)) return true;
-      if (agent.agentView?.ownerUserPrincipal && agent.agentView.ownerUserPrincipal.toLowerCase().includes(prefix)) return true;
-      if (agent.agentView?.ownerDisplayName && agent.agentView.ownerDisplayName.toLowerCase().includes(prefix)) return true;
+      const checkMatch = (val: string) => {
+        if (!val) return false;
+        return disableCaseSensitivity ? val.toLowerCase().includes(prefix) : val.includes(prefix);
+      };
+      
+      if (checkMatch(owner)) return true;
+      if (checkMatch(fullMember)) return true;
+      if (agent.ownerDisplayName && checkMatch(agent.ownerDisplayName)) return true;
+      if (agent.ownerUserPrincipal && checkMatch(agent.ownerUserPrincipal)) return true;
+      if (agent.agentView?.ownerUserPrincipal && checkMatch(agent.agentView.ownerUserPrincipal)) return true;
+      if (agent.agentView?.ownerDisplayName && checkMatch(agent.agentView.ownerDisplayName)) return true;
 
       for (const key of definitionKeys) {
         const definition = (agent as any)[key];
-        if (definition && definition.owner && definition.owner.toLowerCase().includes(prefix)) return true;
+        if (definition && definition.owner && checkMatch(definition.owner)) return true;
       }
     }
   }
@@ -398,11 +420,27 @@ const isAgentOwnedByUser = (agent: any, userEmail: string, userSub: string, pool
   return false;
 };
 
-const isMemberCurrentUser = (member: string, userEmail: string, userSub: string, poolId?: string): boolean => {
+export const isMemberCurrentUser = (
+  member: string, 
+  userEmail: string, 
+  userSub: string, 
+  poolId?: string,
+  disableCaseSensitivity: boolean = false
+): boolean => {
   const owner = getOwnerFromBinding(member);
   
+  const compareEmails = (a: string, b: string): boolean => {
+    if (!a || !b) return false;
+    return disableCaseSensitivity ? a.toLowerCase() === b.toLowerCase() : a === b;
+  };
+
+  const includesEmail = (str: string, email: string): boolean => {
+    if (!str || !email) return false;
+    return disableCaseSensitivity ? str.toLowerCase().includes(email.toLowerCase()) : str.includes(email);
+  };
+
   // 1. Direct email match
-  if (userEmail && (owner === userEmail || member.includes(userEmail))) return true;
+  if (userEmail && (compareEmails(owner, userEmail) || includesEmail(member, userEmail))) return true;
   
   // 2. Direct subject match
   if (userSub && (owner === userSub || member.includes(userSub))) return true;
@@ -415,21 +453,55 @@ const isMemberCurrentUser = (member: string, userEmail: string, userSub: string,
   return false;
 };
 
-const isNotebookOwnedByUser = (
+export const isNotebookOwnedByUser = (
   notebook: any, 
   userEmail: string, 
   userSub: string, 
   poolId?: string,
-  logFn?: (msg: string) => void
+  logFn?: (msg: string) => void,
+  disableCaseSensitivity: boolean = false
 ): boolean => {
   if (logFn) {
     logFn(`[DEBUG] isNotebookOwnedByUser evaluation for "${notebook.title || notebook.name}":`);
     logFn(`  - User Info: email="${userEmail}", sub="${userSub}", poolId="${poolId || ''}"`);
     logFn(`  - Notebook Metadata: ${JSON.stringify(notebook.metadata || null)}`);
+    logFn(`  - Disable Case Sensitivity: ${disableCaseSensitivity}`);
   }
   
+  // 1. Standard project role check
   if (notebook.metadata?.userRole === 'PROJECT_ROLE_OWNER') {
     if (logFn) logFn(`  - Result: User is Project Owner (isOwned = true)`);
+    return true;
+  }
+
+  // Helper for comparing emails/strings based on case sensitivity setting
+  const compareEmails = (a: string, b: string): boolean => {
+    if (!a || !b) return false;
+    return disableCaseSensitivity ? a.toLowerCase() === b.toLowerCase() : a === b;
+  };
+
+  // 2. Email checks against possible owner/creator fields
+  if (userEmail) {
+    const possibleOwners = [
+      notebook.owner,
+      notebook.metadata?.owner,
+      notebook.creator,
+      notebook.metadata?.creator,
+      notebook.metadata?.ownerEmail,
+      notebook.metadata?.creatorEmail
+    ];
+    
+    for (const val of possibleOwners) {
+      if (val && typeof val === 'string' && compareEmails(val, userEmail)) {
+        if (logFn) logFn(`  - Result: Match found in owner/creator field "${val}" (isOwned = true)`);
+        return true;
+      }
+    }
+  }
+
+  // 3. Fallback: If not shared, it's private to the user who fetched it
+  if (notebook.metadata?.isShared === false) {
+    if (logFn) logFn(`  - Result: Notebook is not shared (isOwned = true fallback)`);
     return true;
   }
   
@@ -499,6 +571,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
     enableAgentViewFallback?: boolean;
     forceDownloadBackup?: boolean;
     autoConvertFailedNotes?: boolean;
+    disableCaseSensitivity?: boolean;
   }
 
   const [userTabConfig, setUserTabConfig] = useState<UserTabConfig>(() => {
@@ -509,6 +582,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
         ...parsed,
         bypassAgentOwnerFilter: parsed.bypassAgentOwnerFilter !== undefined ? parsed.bypassAgentOwnerFilter : parsed.bypassOwnerFilter,
         bypassNotebookOwnerFilter: parsed.bypassNotebookOwnerFilter !== undefined ? parsed.bypassNotebookOwnerFilter : parsed.bypassOwnerFilter,
+        disableCaseSensitivity: parsed.disableCaseSensitivity !== undefined ? parsed.disableCaseSensitivity : true,
       };
     }
     const base = { ...import.meta.env, ...runtimeConfig };
@@ -526,6 +600,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
       enableAgentViewFallback: base.VITE_ENABLE_AGENT_VIEW_FALLBACK !== 'false', // Default to true
       forceDownloadBackup: base.VITE_FORCE_DOWNLOAD_BACKUP === 'true',
       autoConvertFailedNotes: base.VITE_AUTO_CONVERT_FAILED_NOTES === 'true', // Default to false
+      disableCaseSensitivity: base.VITE_DISABLE_CASE_SENSITIVITY !== 'false', // Default to true
     };
   });
   const [isUserConfigModalOpen, setIsUserConfigModalOpen] = useState(false);
@@ -597,6 +672,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
       VITE_BYPASS_NOTEBOOK_OWNER_FILTER: runtime.VITE_BYPASS_NOTEBOOK_OWNER_FILTER !== undefined ? runtime.VITE_BYPASS_NOTEBOOK_OWNER_FILTER : import.meta.env.VITE_BYPASS_NOTEBOOK_OWNER_FILTER,
       VITE_FORCE_DOWNLOAD_BACKUP: runtime.VITE_FORCE_DOWNLOAD_BACKUP !== undefined ? runtime.VITE_FORCE_DOWNLOAD_BACKUP : import.meta.env.VITE_FORCE_DOWNLOAD_BACKUP,
       VITE_ENABLE_AGENT_VIEW_FALLBACK: runtime.VITE_ENABLE_AGENT_VIEW_FALLBACK !== undefined ? runtime.VITE_ENABLE_AGENT_VIEW_FALLBACK : import.meta.env.VITE_ENABLE_AGENT_VIEW_FALLBACK,
+      VITE_DISABLE_CASE_SENSITIVITY: runtime.VITE_DISABLE_CASE_SENSITIVITY !== undefined ? runtime.VITE_DISABLE_CASE_SENSITIVITY : import.meta.env.VITE_DISABLE_CASE_SENSITIVITY,
       VITE_DATASTORE_MAPPING: runtime.VITE_DATASTORE_MAPPING || import.meta.env.VITE_DATASTORE_MAPPING,
       VITE_COLLECTION_MAPPING: runtime.VITE_COLLECTION_MAPPING || import.meta.env.VITE_COLLECTION_MAPPING,
     };
@@ -615,6 +691,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
         bypassNotebookOwnerFilter: base.VITE_BYPASS_NOTEBOOK_OWNER_FILTER === 'true' || base.VITE_BYPASS_OWNER_FILTER === 'true',
         enableAgentViewFallback: base.VITE_ENABLE_AGENT_VIEW_FALLBACK !== 'false',
         forceDownloadBackup: base.VITE_FORCE_DOWNLOAD_BACKUP === 'true',
+        disableCaseSensitivity: base.VITE_DISABLE_CASE_SENSITIVITY !== 'false',
       });
     }
     
@@ -890,7 +967,8 @@ const BackupPage: React.FC<BackupPageProps> = ({
     content += `VITE_MIGRATE_AGENTS=${shouldMigrateAgents}\n`;
     content += `VITE_MIGRATE_NOTEBOOKS=${shouldMigrateNotebooks}\n`;
     content += `VITE_FORCE_DOWNLOAD_BACKUP=${userTabConfig.forceDownloadBackup || false}\n`;
-    content += `VITE_AUTO_CONVERT_FAILED_NOTES=${userTabConfig.autoConvertFailedNotes !== false}\n\n`;
+    content += `VITE_AUTO_CONVERT_FAILED_NOTES=${userTabConfig.autoConvertFailedNotes !== false}\n`;
+    content += `VITE_DISABLE_CASE_SENSITIVITY=${userTabConfig.disableCaseSensitivity !== false}\n\n`;
 
     content += `# --- Mappings ---\n`;
     content += `VITE_DATASTORE_MAPPING='${JSON.stringify(datastoreMapping)}'\n`;
@@ -972,6 +1050,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
             bypassNotebookOwnerFilter: config.VITE_BYPASS_NOTEBOOK_OWNER_FILTER === 'true' || config.VITE_BYPASS_OWNER_FILTER === 'true',
             enableAgentViewFallback: config.VITE_ENABLE_AGENT_VIEW_FALLBACK !== 'false', // Default to true if missing/not set to false
             forceDownloadBackup: config.VITE_FORCE_DOWNLOAD_BACKUP === 'true',
+            disableCaseSensitivity: config.VITE_DISABLE_CASE_SENSITIVITY !== 'false', // Default to true
           };
           setUserTabConfig(newUserTabConfig);
 
@@ -1098,6 +1177,7 @@ const BackupPage: React.FC<BackupPageProps> = ({
       enableAgentViewFallback: base.VITE_ENABLE_AGENT_VIEW_FALLBACK !== 'false',
       forceDownloadBackup: base.VITE_FORCE_DOWNLOAD_BACKUP === 'true',
       autoConvertFailedNotes: base.VITE_AUTO_CONVERT_FAILED_NOTES === 'true',
+      disableCaseSensitivity: base.VITE_DISABLE_CASE_SENSITIVITY !== 'false',
     });
     setFeatureFlags({
       idpChangeEnabled: base.VITE_IDP_CHANGE_ENABLED === 'true',
@@ -1721,7 +1801,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             }
 
             const agentWithPolicy = { ...fullAgent, iamPolicy: policy, agentType: 'Low Code', agentFiles };
-            const isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId);
+            const isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId, userTabConfig.disableCaseSensitivity);
             (agentWithPolicy as any).category = isOwned ? 'core' : 'optional';
             userAgents.push(agentWithPolicy);
           } catch (e) {
@@ -1780,7 +1860,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
         const notebookId = nb.name.split('/').pop()!;
         try {
           const rawNotebook = await api.getNotebook(sourceConfig, notebookId);
-          const isActualOwner = isNotebookOwnedByUser(rawNotebook, userEmail, userSub, poolId, isDebugMode ? addLog : undefined);
+          const isActualOwner = isNotebookOwnedByUser(rawNotebook, userEmail, userSub, poolId, isDebugMode ? addLog : undefined, userTabConfig.disableCaseSensitivity);
           if (isDebugMode) {
             addLog(`[DEBUG] Notebook owner check (metadata): ${nb.title || nb.name}, isOwned = ${isActualOwner}`);
           }
@@ -2125,7 +2205,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                 const policy = await api.getAgentIamPolicy(agent.name, sourceConfig);
                 agentWithPolicy = { ...fullAgent, iamPolicy: policy };
                 
-                isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId);
+                isOwned = isAgentOwnedByUser(agentWithPolicy, userEmail, userSub, poolId, userTabConfig.disableCaseSensitivity);
                 
                 if (policy && policy.bindings) {
                   const ownerBinding = policy.bindings.find((b: any) => b.role === 'roles/discoveryengine.agentOwner');
@@ -2243,7 +2323,7 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
             addLog(`  - Warning: Failed to fetch artifacts for notebook ${notebookId}: ${artErr.message}`);
           }
           rawNotebook.artifacts = fullArtifacts;
-          const isActualOwner = isNotebookOwnedByUser(rawNotebook, userEmail, userSub, poolId, isDebugMode ? addLog : undefined);
+          const isActualOwner = isNotebookOwnedByUser(rawNotebook, userEmail, userSub, poolId, isDebugMode ? addLog : undefined, userTabConfig.disableCaseSensitivity);
           const shouldInclude = isActualOwner || userTabConfig.bypassNotebookOwnerFilter;
 
           if (shouldInclude) {
@@ -2783,8 +2863,8 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
 
               if (binding.members) {
                 const filteredMembers = binding.members.filter((member: string) => {
-                  return !isMemberCurrentUser(member, userEmail || '', userSub || '', poolId) &&
-                         (!pendingBackupData?.userEmail || !isMemberCurrentUser(member, pendingBackupData.userEmail, '', poolId));
+                  return !isMemberCurrentUser(member, userEmail || '', userSub || '', poolId, userTabConfig.disableCaseSensitivity) &&
+                         (!pendingBackupData?.userEmail || !isMemberCurrentUser(member, pendingBackupData.userEmail, '', poolId, userTabConfig.disableCaseSensitivity));
                 });
                 sharedWith.push(...filteredMembers);
               }
@@ -2848,8 +2928,8 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
 
               if (binding.members) {
                 const filteredMembers = binding.members.filter((member: string) => {
-                  return !isMemberCurrentUser(member, userEmail || '', userSub || '', poolId) &&
-                         (!pendingBackupData?.userEmail || !isMemberCurrentUser(member, pendingBackupData.userEmail, '', poolId));
+                  return !isMemberCurrentUser(member, userEmail || '', userSub || '', poolId, userTabConfig.disableCaseSensitivity) &&
+                         (!pendingBackupData?.userEmail || !isMemberCurrentUser(member, pendingBackupData.userEmail, '', poolId, userTabConfig.disableCaseSensitivity));
                 });
                 sharedWith.push(...filteredMembers);
               }
@@ -4891,6 +4971,27 @@ gcloud projects add-iam-policy-binding ${targetProject} \\
                     </label>
                     <p className="text-[10px] text-gray-400 mt-0.5">
                       Check this to display and migrate all notebooks you have access to. Shared/collaborator notebooks will be marked as "Shared?" while owned ones are marked "Owner". If unchecked, shared notebooks will be hidden.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="adminDisableCaseSensitivity" 
+                    checked={!!userTabConfig.disableCaseSensitivity} 
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setUserTabConfig(prev => ({ ...prev, disableCaseSensitivity: checked }));
+                    }}
+                    className="mt-0.5 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
+                  />
+                  <div>
+                    <label htmlFor="adminDisableCaseSensitivity" className="text-xs text-gray-700 dark:text-white font-semibold cursor-pointer select-none">
+                      Disable Case Sensitivity for Owner Check
+                    </label>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      When checked, email comparisons for ownership verification will ignore case capitalization (e.g. matching 'AzzoliniG@coned.com' with 'azzolinig@coned.com').
                     </p>
                   </div>
                 </div>
